@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Checkout - Demo Completo (Prueba)</title>
+<style>
+  /* CSS minimalista para estructura (sin diseño visual complejo) */
+  :root{
+    --bg: #f4f6f8;
+    --card: #ffffff;
+    --muted: #666;
+    --accent: #0b75bd;
+    --success: #2d9f6a;
+    --danger: #d64545;
+    --shadow: 0 4px 12px rgba(0,0,0,0.06);
+    font-family: Arial, Helvetica, sans-serif;
+  }
+  body{ background:var(--bg); margin:0; padding:20px; color:#111; }
+  .container{ max-width:1100px; margin:0 auto; }
+  header{ margin-bottom:18px; }
+  h1{ font-size:20px; margin:0 0 6px 0; }
+  p.lead{ margin:0; color:var(--muted); font-size:14px; }
+
+  /* Grid: main + sidebar */
+  .grid{ display:grid; grid-template-columns: 1fr 380px; gap:18px; align-items:start; }
+  .card{ background:var(--card); padding:16px; border-radius:8px; box-shadow:var(--shadow); }
+
+  /* Steps */
+  .stepsBar{ display:flex; gap:8px; margin-bottom:12px; }
+  .stepBadge{ flex:1; padding:8px; border-radius:6px; text-align:center; background:#e9eef5; color:#123; font-weight:600; font-size:13px; }
+  .stepBadge.active{ background:var(--accent); color:#fff; }
+
+  /* Step sections */
+  .stepSection{ display:none; }
+  .stepSection.active{ display:block; }
+
+  label{ display:block; font-size:13px; margin-bottom:6px; color:#222; }
+  input[type="text"], input[type="email"], input[type="tel"], select, input[type="number"], input[type="date"]{
+    width:100%; padding:8px 10px; margin-bottom:10px; border:1px solid #ddd; border-radius:6px; box-sizing:border-box;
+  }
+  .row{ display:flex; gap:10px; }
+  .col{ flex:1; }
+  .small{ width:110px; }
+
+  .muted{ color:var(--muted); font-size:13px; }
+  .actions{ margin-top:12px; display:flex; gap:8px; justify-content:flex-end; }
+  button{ padding:10px 14px; border-radius:6px; border:0; cursor:pointer; font-weight:600; }
+  .btn-primary{ background:var(--accent); color:#fff; }
+  .btn-secondary{ background:#e6eef7; color:#123; }
+  .btn-danger{ background:var(--danger); color:#fff; }
+  .btn-success{ background:var(--success); color:#fff; }
+
+  /* Cart list */
+  .cartItem{ display:flex; gap:10px; align-items:center; border-bottom:1px dashed #eee; padding:10px 0; }
+  .cartItem:last-child{ border-bottom:0; }
+  .cartItem .img{ width:72px; height:72px; background:#f2f4f7; border-radius:6px; display:flex; align-items:center; justify-content:center; color:#999; font-size:12px; }
+  .cartDetails{ flex:1; }
+  .qtyInput{ width:70px; }
+
+  .summaryRow{ display:flex; justify-content:space-between; padding:6px 0; border-top:1px solid #f0f0f0; margin-top:8px;}
+  .summaryRow.total{ font-weight:700; font-size:16px; }
+
+  /* Payment details sections hidden by default */
+  .paymentDetails{ display:none; margin-top:8px; border:1px solid #f0f0f0; padding:10px; border-radius:6px; background:#fafafa; }
+
+  /* Simple modal */
+  .modalBackdrop{ position:fixed; inset:0; background:rgba(0,0,0,0.4); display:flex; align-items:center; justify-content:center; visibility:hidden; opacity:0; transition:all .18s ease; }
+  .modalBackdrop.visible{ visibility:visible; opacity:1; }
+  .modalCard{ width:520px; max-width:92%; background:#fff; padding:18px; border-radius:8px; box-shadow:0 8px 30px rgba(0,0,0,0.12); }
+
+  footer{ margin-top:18px; text-align:center; color:var(--muted); font-size:13px; }
+
+  /* Responsive */
+  @media (max-width:980px){
+    .grid{ grid-template-columns: 1fr; }
+    .actions{ justify-content:space-between; }
+  }
+</style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>sian soft</h1>
+      <p class="lead">tiendita</p>
+    </header>
+
+    <!-- Steps bar -->
+    <div class="card" style="margin-bottom:14px;">
+      <div class="stepsBar" id="stepsBar">
+        <div class="stepBadge active" data-step="0">1. Carrito</div>
+        <div class="stepBadge" data-step="1">2. Datos</div>
+        <div class="stepBadge" data-step="2">3. Envío</div>
+        <div class="stepBadge" data-step="3">4. Pago</div>
+        <div class="stepBadge" data-step="4">5. Confirmar</div>
+      </div>
+    </div>
+
+    <div class="grid"> 
+      <!-- LEFT: main form -->
+      <main>
+        <form id="checkoutForm" class="card" onsubmit="return onSubmitForm(event);">
+          <!-- STEP 0: CART -->
+          <section class="stepSection active" id="step-0">
+            <h3>Resumen del carrito</h3>
+            <div id="cartList">
+              <!-- Items injected by JS -->
+            </div>
+
+            <div style="margin-top:10px;">
+              <label for="codigoPromo">¿Tienes código de promoción?</label>
+              <div class="row" style="align-items:center;">
+                <input id="codigoPromo" type="text" placeholder="Ingrese código (ej: BIENVENIDA10)">
+                <button type="button" class="btn-secondary" onclick="aplicarCodigo()">Aplicar</button>
+              </div>
+              <div id="promoMsg" class="muted" style="margin-top:6px;"></div>
+            </div>
+
+             <div style="margin-top:12px;">
+              <div class="summaryRow"><div>Subtotal</div><div id="subtotalText">S/ 0.00</div></div>
+              <div class="summaryRow"><div>Descuento</div><div id="descuentoText">S/ 0.00</div></div>
+              <div class="summaryRow"><div>Impuesto (IGV 18%)</div><div id="impuestoText">S/ 0.00</div></div>
+              <div class="summaryRow"><div>Envío</div><div id="envioText">Gratis</div></div>
+              <div class="summaryRow total"><div>Total</div><div id="totalText">S/ 0.00</div></div>
+            </div>
+
+            <div class="actions">
+              <button type="button" class="btn-secondary" onclick="resetDemo()">Vaciar</button>
+              <button type="button" class="btn-primary" onclick="goToStep(1)">Continuar</button>
+            </div>
+          </section>
+
+          <!-- STEP 1: DATOS PERSONALES -->
+          <section class="stepSection" id="step-1">
+            <h3>Datos personales y contacto</h3>
+            <div class="row">
+              <div class="col">
+                <label>Tipo de documento</label>
+                <select id="tipoDocumento" required>
+                  <option value="">Seleccione</option>
+                  <option value="DNI">DNI</option>
+                  <option value="CE">Carnet de extranjería</option>
+                  <option value="PAS">Pasaporte</option>
+                  <option value="RUC">RUC (empresa)</option>
+                </select>
+              </div>
+              <div class="col small">
+                <label>N° documento</label>
+                <input id="numeroDocumento" type="text" placeholder="12345678" />
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="col">
+                <label>Nombres</label>
+                <input id="nombres" type="text" placeholder="Nombres" />
+              </div>
+              <div class="col">
+                <label>Apellidos</label>
+                <input id="apellidos" type="text" placeholder="Apellidos" />
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="col">
+                <label>Correo electrónico</label>
+                <input id="email" type="email" placeholder="ejemplo@correo.com" />
+              </div>
+              <div class="col">
+                <label>Teléfono celular</label>
+                <input id="telefono" type="tel" placeholder="999999999" />
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="col small">
+                <label>Fecha de nacimiento</label>
+                <input id="fechaNacimiento" type="date" />
+              </div>
+              <div class="col">
+                <label>Género (opcional)</label>
+                <select id="genero">
+                  <option value="">No declarar</option>
+                  <option>Masculino</option>
+                  <option>Femenino</option>
+                  <option>Otro</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Facturación: mostrar campos si pide factura -->
+            <div style="margin-top:8px;">
+              <label><input id="needInvoice" type="checkbox" /> Solicitar factura / boleta (datos fiscales)</label>
+            </div>
+
+            <div id="invoiceFields" style="display:none; margin-top:8px;">
+              <label>Tipo documento (facturación)</label>
+              <select id="tipoFactura">
+                <option value="RUC">RUC</option>
+                <option value="DNI">DNI</option>
+              </select>
+              <label>RUC / DNI</label>
+              <input id="rucFactura" type="text" placeholder="20000000001" />
+              <label>Razón social</label>
+              <input id="razonSocial" type="text" placeholder="Razón social / Nombre" />
+              <label>Dirección fiscal</label>
+              <input id="direccionFiscal" type="text" placeholder="Dirección para la factura" />
+            </div>
+
+            <div class="actions">
+              <button type="button" class="btn-secondary" onclick="goToStep(0)">Atrás</button>
+              <button type="button" class="btn-primary" onclick="onDatosNext()">Siguiente</button>
+            </div>
+          </section>
+
+          <!-- STEP 2: DIRECCIÓN / ENVÍO -->
+          <section class="stepSection" id="step-2">
+            <h3>Dirección y entrega</h3>
+
+            <div class="row">
+              <div class="col small">
+                <label>País</label>
+                <select id="pais">
+                  <option value="PE">Perú</option>
+                  <option value="CL">Chile</option>
+                  <option value="CO">Colombia</option>
+                  <option value="US">Estados Unidos</option>
+                </select>
+              </div>
+              <div class="col">
+                <label>Región / Departamento</label>
+                <input id="region" type="text" placeholder="Lima" />
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="col">
+                <label>Provincia</label>
+                <input id="provincia" type="text" placeholder="Provincia" />
+              </div>
+              <div class="col">
+                <label>Distrito</label>
+                <input id="distrito" type="text" placeholder="Distrito" />
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="col">
+                <label>Calle / Avenida</label>
+                <input id="calle" type="text" placeholder="Av. Ejemplo 123" />
+              </div>
+              <div class="col small">
+                <label>Número</label>
+                <input id="numero" type="text" placeholder="N°" />
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="col small">
+                <label>Interior / Piso</label>
+                <input id="interior" type="text" placeholder="Interior / Dpto." />
+              </div>
+              <div class="col">
+                <label>Referencia</label>
+                <input id="referencia" type="text" placeholder="Ej: cerca al colegio X" />
+              </div>
+            </div>
+
+            <div style="margin-top:8px;">
+              <label>Tipo de entrega</label>
+              <label><input type="radio" name="deliveryOption" value="domicilio" checked /> Envío a domicilio</label>
+              <label><input type="radio" name="deliveryOption" value="recojo" /> Recojo en tienda</label>
+            </div>
+
+            <div style="margin-top:8px;">
+              <label>Horario de entrega preferido (opcional)</label>
+              <select id="ventanaHorario">
+                <option value="">Sin preferencia</option>
+                <option value="manana">08:00 - 12:00</option>
+                <option value="tarde">12:00 - 17:00</option>
+                <option value="noche">17:00 - 21:00</option>
+              </select>
+            </div>
+
+            <div class="actions">
+              <button type="button" class="btn-secondary" onclick="goToStep(1)">Atrás</button>
+              <button type="button" class="btn-primary" onclick="onEnvioNext()">Siguiente</button>
+            </div>
+          </section>
+
+          <!-- STEP 3: PAGO -->
+          <section class="stepSection" id="step-3">
+            <h3>Método de pago</h3>
+            <div>
+              <label><input type="radio" name="paymentMethod" value="tarjeta" /> Tarjeta de crédito / débito</label>
+              <label><input type="radio" name="paymentMethod" value="yape" /> Yape / Plin</label>
+              <label><input type="radio" name="paymentMethod" value="transferencia" /> Transferencia bancaria</label>
+              <label><input type="radio" name="paymentMethod" value="contraentrega" /> Pago contra entrega</label>
+            </div>
+
+            <!-- Tarjeta -->
+            <div id="payment-tarjeta" class="paymentDetails">
+              <label>Nombre en la tarjeta</label>
+              <input id="cardName" type="text" placeholder="Nombre como aparece en la tarjeta" />
+              <label>Número de tarjeta</label>
+              <input id="cardNumber" type="text" placeholder="0000 0000 0000 0000" maxlength="19" />
+              <div class="row">
+                <div class="col small"><label>Vencimiento (MM/AA)</label><input id="cardExpiry" placeholder="MM/AA" /></div>
+                <div class="col small"><label>CVV</label><input id="cardCVV" type="text" maxlength="4" placeholder="123" /></div>
+                <div class="col"><label>Banco emisor (opcional)</label><input id="cardBank" placeholder="Banco" /></div>
+              </div>
+              <label><input id="saveCard" type="checkbox" /> Guardar tarjeta para próximas compras (demo)</label>
+            </div>
+
+            <!-- Yape / Plin -->
+            <div id="payment-yape" class="paymentDetails">
+              <label>Número Yape / Plin</label>
+              <input id="yapeNumber" placeholder="999999999" />
+              <p class="muted">Escanea el QR desde la app o ingresa el número para confirmar (demo).</p>
+            </div>
+
+            <!-- Transferencia -->
+            <div id="payment-transfer" class="paymentDetails">
+              <p class="muted">Datos bancarios: Banco ABC - Cuenta: 123-456-789 - Interbancaria: 000111222333</p>
+              <label>Referencia de transferencia</label>
+              <input id="transferRef" placeholder="Código o N° de operación" />
+            </div>
+
+            <!-- Contraentrega -->
+            <div id="payment-contr" class="paymentDetails">
+              <p class="muted">Pagarás al momento de la entrega. Recibirás instrucciones. (Demo)</p>
+              <label>¿Quién recibirá el paquete?</label>
+              <input id="receiverName" placeholder="Nombre de la persona que recibe" />
+            </div>
+
+            <div class="actions">
+              <button type="button" class="btn-secondary" onclick="goToStep(2)">Atrás</button>
+              <button type="submit" class="btn-success" id="btnFinalize">Realizar compra</button>
+            </div>
+          </section>
+
+          <!-- STEP 4: CONFIRMACION -->
+          <section class="stepSection" id="step-4">
+            <h3>Confirmación</h3>
+            <p>Revisa tu pedido y confirma. (En este demo la compra no llega al servidor; es una simulación).</p>
+
+            <div style="margin-top:8px;">
+              <h4>Resumen</h4>
+              <div id="confirmSummary" style="font-size:14px;"></div>
+            </div>
+
+            <div class="actions">
+              <button type="button" class="btn-secondary" onclick="goToStep(3)">Atrás</button>
+              <button type="button" class="btn-primary" onclick="finalizeOrder()">Confirmar pedido</button>
+            </div>
+          </section>
+
+        </form>
+      </main>
+
+      <!-- RIGHT: Sidebar summary -->
+      <aside>
+        <div class="card">
+          <h4>Resumen de pago</h4>
+          <div style="margin-top:8px;">
+            <div class="summaryRow"><div>Subtotal</div><div id="sideSubtotal">S/ 0.00</div></div>
+            <div class="summaryRow"><div>Descuento</div><div id="sideDescuento">S/ 0.00</div></div>
+            <div class="summaryRow"><div>IGV</div><div id="sideImpuesto">S/ 0.00</div></div>
+            <div class="summaryRow"><div>Envío</div><div id="sideEnvio">Gratis</div></div>
+            <div class="summaryRow total"><div>Total</div><div id="sideTotal">S/ 0.00</div></div>
+          </div>
+          <div style="margin-top:10px;">
+            <button class="btn-primary" style="width:100%" onclick="goToStep(4)">Ir a confirmar</button>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:12px;">
+          <h4>Ayuda rápida</h4>
+          <p class="muted">Tel: 01-800-000 • Horario: Lun-Vie 9:00-18:00 </p>
+        </div>
+      </aside>
+    </div>
+
+    <footer>
+      <p class="muted">sian soft.</p>
+    </footer>
+  </div>
+
+  <!-- Modal: Confirmación -->
+  <div id="modal" class="modalBackdrop" role="dialog" aria-hidden="true">
+    <div class="modalCard">
+      <h3>Pedido Simulado: ¡Listo!</h3>
+      <p id="modalMsg">Tu pedido ha sido generado (simulado). Número de pedido: <strong id="orderId">-</strong></p>
+      <div style="margin-top:12px; text-align:right;">
+        <button class="btn-secondary" onclick="closeModal()">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* ===========================
+   JS: Lógica del checkout demo
+   =========================== */
+
+/* Datos de ejemplo: productos en el carrito */
+let cart = [
+  { id: 1, name: "Camiseta deportiva", price: 59.90, qty: 1 },
+  { id: 2, name: "Jeans clásico", price: 129.00, qty: 1 },
+  { id: 3, name: "Zapatillas urbanas", price: 199.50, qty: 1 }
+];
+
+let promoApplied = null;
+
+/* Utils */
+function formatCurrency(num){
+  return "S/ " + Number(num).toFixed(2);
+}
+
+/* Calculo de totales */
+function computeTotals(){
+  let subtotal = cart.reduce((s,p)=>s + p.price * p.qty, 0);
+  let descuento = 0;
+  // ejemplo: promo BIENVENIDA10 -> 10% si subtotal >= 100
+  if(promoApplied === "BIENVENIDA10" && subtotal >= 100){
+    descuento = subtotal * 0.10;
+  }
+  // ejemplo descuento fijo para DEMO20
+  if(promoApplied === "DEMO20"){
+    descuento = 20.0;
+  }
+  let taxable = subtotal - descuento;
+  let impuesto = taxable * 0.18; // IGV 18%
+  // envío: gratis si subtotal>=50 en demo, sino 10
+  let envio = (subtotal >= 50) ? 0 : 10.00;
+  let total = taxable + impuesto + envio;
+  return { subtotal, descuento, impuesto, envio, total };
+}
+
+/* Render carrito en DOM */
+function renderCart(){
+  const container = document.getElementById("cartList");
+  container.innerHTML = "";
+  cart.forEach((p,idx)=>{
+    const div = document.createElement("div");
+    div.className = "cartItem";
+    div.innerHTML = `
+      <div class="img">IMG</div>
+      <div class="cartDetails">
+        <div style="font-weight:600">${escapeHtml(p.name)}</div>
+        <div class="muted">S/ ${p.price.toFixed(2)}</div>
+      </div>
+      <div style="text-align:right;">
+        <div style="margin-bottom:6px;">Subtotal: <strong>S/ ${(p.price*p.qty).toFixed(2)}</strong></div>
+        <div>
+          <input class="qtyInput" type="number" min="1" value="${p.qty}" data-idx="${idx}" />
+          <button class="btn-secondary" style="margin-top:6px;" data-remove="${idx}">Eliminar</button>
+        </div>
+      </div>
+    `;
+    container.appendChild(div);
+  });
+
+  // attach listeners
+  document.querySelectorAll(".qtyInput").forEach(inp=>{
+    inp.addEventListener("change", function(e){
+      const idx = parseInt(e.target.dataset.idx);
+      let val = parseInt(e.target.value) || 1;
+      if(val < 1) val = 1;
+      cart[idx].qty = val;
+      updateTotalsInDOM();
+      renderCart();
+    });
+  });
+  document.querySelectorAll("[data-remove]").forEach(btn=>{
+    btn.addEventListener("click", function(e){
+      const idx = parseInt(e.target.getAttribute("data-remove"));
+      cart.splice(idx,1);
+      renderCart();
+      updateTotalsInDOM();
+    });
+  });
+
+  updateTotalsInDOM();
+}
+
+/* aplicar codigo promo */
+function aplicarCodigo(){
+  const code = document.getElementById("codigoPromo").value.trim().toUpperCase();
+  const msg = document.getElementById("promoMsg");
+  if(!code){ msg.innerText = "Ingrese un código."; return; }
+  // demo valid codes
+  if(code === "BIENVENIDA10" || code === "DEMO20"){
+    promoApplied = code;
+    msg.style.color = "green";
+    msg.innerText = `Código ${code} aplicado.`;
+  } else {
+    promoApplied = null;
+    msg.style.color = "red";
+    msg.innerText = "Código inválido.";
+  }
+  updateTotalsInDOM();
+}
+
+/* Actualiza totales en UI */
+function updateTotalsInDOM(){
+  const t = computeTotals();
+  document.getElementById("subtotalText").innerText = formatCurrency(t.subtotal);
+  document.getElementById("descuentoText").innerText = formatCurrency(t.descuento);
+  document.getElementById("impuestoText").innerText = formatCurrency(t.impuesto);
+  document.getElementById("envioText").innerText = t.envio === 0 ? "Gratis" : formatCurrency(t.envio);
+  document.getElementById("totalText").innerText = formatCurrency(t.total);
+
+  // sidebar
+  document.getElementById("sideSubtotal").innerText = formatCurrency(t.subtotal);
+  document.getElementById("sideDescuento").innerText = formatCurrency(t.descuento);
+  document.getElementById("sideImpuesto").innerText = formatCurrency(t.impuesto);
+  document.getElementById("sideEnvio").innerText = t.envio === 0 ? "Gratis" : formatCurrency(t.envio);
+  document.getElementById("sideTotal").innerText = formatCurrency(t.total);
+}
+
+/* Navigation steps */
+function goToStep(n){
+  // Boundaries 0..4
+  n = Math.max(0, Math.min(4, n));
+  document.querySelectorAll(".stepSection").forEach(sec => sec.classList.remove("active"));
+  document.getElementById("step-" + n).classList.add("active");
+  // update step badges
+  document.querySelectorAll(".stepBadge").forEach(b => b.classList.remove("active"));
+  document.querySelectorAll(".stepBadge[data-step]").forEach(b=>{
+    if(parseInt(b.getAttribute("data-step")) <= n) b.classList.add("active");
+  });
+  // Scroll to top of form
+  window.scrollTo({top:0, behavior:"smooth"});
+  if(n === 4) buildConfirmSummary();
+}
+
+/* Validations para avanzar desde datos personales */
+function onDatosNext(){
+  // Simple validations
+  const tipo = document.getElementById("tipoDocumento").value;
+  const nro = document.getElementById("numeroDocumento").value.trim();
+  const nombres = document.getElementById("nombres").value.trim();
+  const apellidos = document.getElementById("apellidos").value.trim();
+  const email = document.getElementById("email").value.trim();
+  const tel = document.getElementById("telefono").value.trim();
+
+  if(!tipo){ alert("Seleccione tipo de documento."); return; }
+  if(!nro || nro.length < 4){ alert("Ingrese número de documento válido."); return; }
+  if(!nombres || !apellidos){ alert("Ingrese nombres y apellidos."); return; }
+  if(!validateEmail(email)){ alert("Ingrese un correo válido."); return; }
+  if(!tel || tel.length < 6){ alert("Ingrese teléfono válido."); return; }
+
+  // factura?
+  const needInv = document.getElementById("needInvoice").checked;
+  if(needInv){
+    const ruc = document.getElementById("rucFactura").value.trim();
+    const razon = document.getElementById("razonSocial").value.trim();
+    if(!ruc || ruc.length < 8){ alert("Ingrese RUC válido para la factura."); return; }
+    if(!razon){ alert("Ingrese razón social para la factura."); return; }
+  }
+
+  goToStep(2);
+}
+
+/* Validaciones para avanzar desde envio */
+function onEnvioNext(){
+  const calle = document.getElementById("calle").value.trim();
+  const numero = document.getElementById("numero").value.trim();
+  const distrito = document.getElementById("distrito").value.trim();
+  if(!calle || !numero || !distrito){ alert("Complete la dirección (calle, número y distrito)."); return; }
+  goToStep(3);
+}
+
+/* Construir resumen de confirmación */
+function buildConfirmSummary(){
+  const t = computeTotals();
+  let html = `<p><strong>Productos:</strong></p><ul>`;
+  cart.forEach(p=>{
+    html += `<li>${escapeHtml(p.name)} — ${p.qty} x ${formatCurrency(p.price)} = <strong>${formatCurrency(p.qty*p.price)}</strong></li>`;
+  });
+  html += `</ul>`;
+  html += `<p><strong>Subtotal:</strong> ${formatCurrency(t.subtotal)}<br>`;
+  html += `<strong>Descuento:</strong> ${formatCurrency(t.descuento)}<br>`;
+  html += `<strong>IGV:</strong> ${formatCurrency(t.impuesto)}<br>`;
+  html += `<strong>Envío:</strong> ${t.envio===0 ? "Gratis": formatCurrency(t.envio)}<br>`;
+  html += `<strong>Total:</strong> ${formatCurrency(t.total)}</p>`;
+
+  // Datos cliente
+  html += `<p><strong>Cliente:</strong> ${escapeHtml(document.getElementById("nombres").value || "-")} ${escapeHtml(document.getElementById("apellidos").value || "-")}<br>`;
+  html += `<strong>Correo:</strong> ${escapeHtml(document.getElementById("email").value || "-")} • <strong>Tel:</strong> ${escapeHtml(document.getElementById("telefono").value || "-")}</p>`;
+
+  // Direccion
+  const direccion = `${escapeHtml(document.getElementById("calle").value || "")} ${escapeHtml(document.getElementById("numero").value || "")} ${escapeHtml(document.getElementById("interior").value || "")}, ${escapeHtml(document.getElementById("distrito").value || "")} - ${escapeHtml(document.getElementById("region").value || "")}`;
+  html += `<p><strong>Dirección:</strong> ${direccion}</p>`;
+
+  // Pago elegido
+  const payment = document.querySelector('input[name="paymentMethod"]:checked');
+  html += `<p><strong>Método de pago:</strong> ${payment ? payment.value : "-"}</p>`;
+
+  document.getElementById("confirmSummary").innerHTML = html;
+}
+
+/* Submit del formulario (simulado) */
+function onSubmitForm(e){
+  e.preventDefault();
+  // si estamos en pasos previos: llevar al paso actual final
+  const activeIndex = [...document.querySelectorAll(".stepSection")].findIndex(s=>s.classList.contains("active"));
+  if(activeIndex < 4){
+    // ir a confirmación
+    if(activeIndex < 3){
+      // intentar avanzar dependiendo de dónde estemos
+      if(activeIndex === 0) goToStep(1);
+      else if(activeIndex === 1) onDatosNext();
+      else if(activeIndex === 2) onEnvioNext();
+    } else {
+      goToStep(4);
+    }
+    return false;
+  }
+
+  // En confirmación (step 4) no se envía realmente — simulamos validaciones finales
+  const paymentMethod = document.querySelector('input[name="paymentMethod"]:checked');
+  if(!paymentMethod){ alert("Seleccione un método de pago."); return false; }
+
+  // Validación según método
+  const pm = paymentMethod.value;
+  if(pm === "tarjeta"){
+    const name = document.getElementById("cardName").value.trim();
+    const num = document.getElementById("cardNumber").value.replace(/\s+/g,'');
+    const exp = document.getElementById("cardExpiry").value.trim();
+    const cvv = document.getElementById("cardCVV").value.trim();
+    if(!name || num.length < 12 || exp.length < 3 || cvv.length < 3){
+      alert("Complete datos de la tarjeta correctamente.");
+      goToStep(3);
+      return false;
+    }
+  } else if(pm === "yape"){
+    const ynum = document.getElementById("yapeNumber").value.trim();
+    if(!ynum || ynum.length < 6){ alert("Ingrese número Yape/Plin válido."); goToStep(3); return false; }
+  } else if(pm === "transferencia"){
+    const ref = document.getElementById("transferRef").value.trim();
+    if(!ref){ alert("Ingrese referencia de transferencia."); goToStep(3); return false; }
+  } else if(pm === "contraentrega"){
+    const rec = document.getElementById("receiverName").value.trim();
+    if(!rec){ alert("Ingrese nombre de la persona que recibe."); goToStep(3); return false; }
+  }
+
+  // Si pasa todo, simulamos creación de pedido
+  const orderId = "ORD" + Math.floor(Math.random()*900000+100000);
+  document.getElementById("orderId").innerText = orderId;
+  showModal(`Tu pedido simulado (${orderId}) se registró correctamente. Total: ${document.getElementById("sideTotal").innerText}`);
+  return false;
+}
+
+/* Final confirm (cuando se presiona Confirmar en step 4) */
+function finalizeOrder(){
+  // Simplemente mandar submit del form para que onSubmitForm haga la simulación
+  document.getElementById("checkoutForm").dispatchEvent(new Event('submit', {cancelable:true, bubbles:true}));
+}
+
+/* Modal controls */
+function showModal(msg){
+  const modal = document.getElementById("modal");
+  document.getElementById("modalMsg").innerText = msg;
+  modal.classList.add("visible");
+  modal.setAttribute("aria-hidden","false");
+}
+function closeModal(){
+  const modal = document.getElementById("modal");
+  modal.classList.remove("visible");
+  modal.setAttribute("aria-hidden","true");
+}
+
+/* Small helpers */
+function validateEmail(email){
+  const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return re.test(email);
+}
+function escapeHtml(text){
+  if(!text) return "";
+  return text.replace(/[&<>"'`=\/]/g, function(s){
+    return({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;','/':'&#x2F;','`':'&#x60;','=':'&#x3D;'})[s];
+  });
+}
+
+/* Invoice fields toggle */
+document.getElementById("needInvoice").addEventListener("change", function(e){
+  document.getElementById("invoiceFields").style.display = e.target.checked ? "block" : "none";
+});
+
+/* Payment method toggles */
+document.querySelectorAll('input[name="paymentMethod"]').forEach(r=>{
+  r.addEventListener("change", function(e){
+    // hide all
+    ["payment-tarjeta","payment-yape","payment-transfer","payment-contr"].forEach(id=> document.getElementById(id).style.display = "none");
+    if(e.target.value === "tarjeta") document.getElementById("payment-tarjeta").style.display = "block";
+    if(e.target.value === "yape") document.getElementById("payment-yape").style.display = "block";
+    if(e.target.value === "transferencia") document.getElementById("payment-transfer").style.display = "block";
+    if(e.target.value === "contraentrega") document.getElementById("payment-contr").style.display = "block";
+  });
+});
+
+/* Buttons actions */
+function resetDemo(){
+  if(!confirm("¿Vaciar el carrito?")) return;
+  cart = [];
+  renderCart();
+  updateTotalsInDOM();
+}
+
+/* Inicialización */
+(function init(){
+  renderCart();
+  updateTotalsInDOM();
+  // set default step to 0
+  goToStep(0);
+})();
+
+
+</script>
+<footer>
+    <h1>tienda siam soft</h1>
+</footer>
+</body>
+</html>
