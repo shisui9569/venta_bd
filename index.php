@@ -15,12 +15,14 @@ if ($pagina < 1) $pagina = 1;
 $busqueda = "";
 $categoria = "";
 $orden = "";
+$envio_gratis = "";
 
 // Verificar si es una carga inicial (sin parámetros GET) o una búsqueda intencional
-if (!empty($_GET) && (isset($_GET['buscar']) || isset($_GET['categoria']) || isset($_GET['orden']))) {
+if (!empty($_GET) && (isset($_GET['buscar']) || isset($_GET['categoria']) || isset($_GET['orden']) || isset($_GET['envio_gratis']))) {
     $busqueda = isset($_GET['buscar']) ? $conexion->real_escape_string($_GET['buscar']) : "";
     $categoria = isset($_GET['categoria']) ? $conexion->real_escape_string($_GET['categoria']) : "";
     $orden = isset($_GET['orden']) ? $_GET['orden'] : "";
+    $envio_gratis = isset($_GET['envio_gratis']) ? $conexion->real_escape_string($_GET['envio_gratis']) : "";
 }
 
 // Construir WHERE dinámico - SOLO PRODUCTOS CON STOCK DISPONIBLE
@@ -30,6 +32,9 @@ if ($busqueda != "") {
 }
 if ($categoria != "") {
     $where .= " AND categoria = '$categoria'";
+}
+if ($envio_gratis != "") {
+    $where .= " AND envio_gratis = " . ($envio_gratis == '1' ? '1' : '0');
 }
 
 // Ordenamiento
@@ -47,12 +52,18 @@ $totalPaginas = ceil($totalProductos / $productosPorPagina);
 // Calcular inicio
 $inicio = ($pagina - 1) * $productosPorPagina;
 
+// Verificar si la columna envio_gratis existe, si no, agregarla
+$result = $conexion->query("SHOW COLUMNS FROM productos LIKE 'envio_gratis'");
+if ($result->num_rows == 0) {
+    $conexion->query("ALTER TABLE productos ADD COLUMN envio_gratis BOOLEAN DEFAULT FALSE");
+}
+
 // Obtener productos de la página actual (solo disponibles)
-$sql = "SELECT id_producto, nombre, descripcion, categoria, precio_venta, precio_regular, descuento_porcentaje, descuento_monto, en_oferta, stock, imagen FROM productos $where $orderBy LIMIT $inicio, $productosPorPagina";
+$sql = "SELECT id_producto, nombre, descripcion, categoria, precio_venta, precio_regular, descuento_porcentaje, descuento_monto, en_oferta, envio_gratis, stock, imagen FROM productos $where $orderBy LIMIT $inicio, $productosPorPagina";
 $resultado = $conexion->query($sql);
 
 // Obtener productos agotados para mostrar en sección separada
-$sqlAgotados = "SELECT id_producto, nombre, descripcion, categoria, precio_venta, precio_regular, descuento_porcentaje, descuento_monto, en_oferta, stock, imagen FROM productos WHERE stock = 0 ORDER BY id_producto DESC LIMIT 4";
+$sqlAgotados = "SELECT id_producto, nombre, descripcion, categoria, precio_venta, precio_regular, descuento_porcentaje, descuento_monto, en_oferta, envio_gratis, stock, imagen FROM productos WHERE stock = 0 ORDER BY id_producto DESC LIMIT 4";
 $resultadoAgotados = $conexion->query($sqlAgotados);
 $totalAgotados = $resultadoAgotados->num_rows;
 ?>
@@ -2033,6 +2044,13 @@ $totalAgotados = $resultadoAgotados->num_rows;
               <?php endif; ?>
             </div>
 
+            <!-- Envío Gratis Badge -->
+            <?php if ($producto['envio_gratis']): ?>
+              <div class="product-badge" style="background: linear-gradient(135deg, #6366f1, #8b5cf6); top: 15px; left: auto; right: 15px;">
+                <i class="fas fa-truck mr-1"></i>Envío Gratis
+              </div>
+            <?php endif; ?>
+
             <!-- Descuento Badge -->
             <?php if ($producto['descuento_porcentaje'] > 0 || $producto['descuento_monto'] > 0): ?>
               <div class="descuento-badge">
@@ -2163,6 +2181,13 @@ $totalAgotados = $resultadoAgotados->num_rows;
             Agotado
           </div>
 
+          <!-- Envío Gratis Badge -->
+          <?php if ($productoAgotado['envio_gratis']): ?>
+            <div class="product-badge" style="background: linear-gradient(135deg, #6366f1, #8b5cf6); top: 15px; left: auto; right: 15px;">
+              <i class="fas fa-truck mr-1"></i>Envío Gratis
+            </div>
+          <?php endif; ?>
+
           <!-- Product Image -->
           <div class="product-image-container">
             <?php if (!empty($productoAgotado['imagen']) && file_exists($productoAgotado['imagen'])): ?>
@@ -2254,17 +2279,7 @@ $totalAgotados = $resultadoAgotados->num_rows;
         const searchContainer = document.getElementById('searchContainer');
         
         // Solo activar el campo de búsqueda cuando se haga clic directamente en él
-        document.addEventListener('click', function(e) {
-            // Si el clic NO fue en el contenedor de búsqueda, quitar el foco
-            if (!searchContainer.contains(e.target)) {
-                searchInput.blur();
-            }
-        });
-        
-        // Prevenir propagación de clics dentro del contenedor de búsqueda
-        searchContainer.addEventListener('click', function(e) {
-            e.stopPropagation();
-        });
+        // Removido el código que quitaba el foco al hacer clic en otro lugar para evitar ocultar el menú
     });
 
     // ============================================
@@ -2276,12 +2291,14 @@ $totalAgotados = $resultadoAgotados->num_rows;
         const buscar = document.getElementById('buscarInput').value.trim();
         const categoria = document.getElementById('categoriaSelect').value;
         const orden = document.getElementById('ordenSelect').value;
+        const envio = document.getElementById('envioSelect').value;
         
         const params = new URLSearchParams();
         
         if (buscar) params.set('buscar', buscar);
         if (categoria) params.set('categoria', categoria);
         if (orden) params.set('orden', orden);
+        if (envio) params.set('envio_gratis', envio);
         
         // Redirigir con los nuevos parámetros
         const newUrl = 'index.php?' + params.toString();
@@ -2350,6 +2367,7 @@ $totalAgotados = $resultadoAgotados->num_rows;
         // Prevenir que los selects envíen automáticamente
         const categoriaSelect = document.getElementById('categoriaSelect');
         const ordenSelect = document.getElementById('ordenSelect');
+        const envioSelect = document.getElementById('envioSelect');
         
         if (categoriaSelect) {
             categoriaSelect.addEventListener('change', function(e) {
@@ -2360,6 +2378,13 @@ $totalAgotados = $resultadoAgotados->num_rows;
         
         if (ordenSelect) {
             ordenSelect.addEventListener('change', function(e) {
+                e.preventDefault();
+                // No hacer nada - solo el botón aplica los filtros
+            });
+        }
+        
+        if (envioSelect) {
+            envioSelect.addEventListener('change', function(e) {
                 e.preventDefault();
                 // No hacer nada - solo el botón aplica los filtros
             });
@@ -2557,7 +2582,9 @@ $totalAgotados = $resultadoAgotados->num_rows;
 
       // Cerrar menú al hacer clic fuera
       document.addEventListener('click', (e) => {
-        if (!commercialNav.contains(e.target) && !mobileMenuBtn.contains(e.target)) {
+        // Solo cerrar el menú si el click no es en el menú ni en el botón de menú móvil
+        // y ademas estamos en vista móvil
+        if (!commercialNav.contains(e.target) && !mobileMenuBtn.contains(e.target) && window.innerWidth <= 991) {
           commercialNav.style.display = 'none';
         }
       });
@@ -2630,9 +2657,9 @@ $totalAgotados = $resultadoAgotados->num_rows;
     .chat-icon {
       position: fixed;
       bottom: 30px;
-      right: 30px;
-      width: 60px;
-      height: 60px;
+      right: 110px;  /* Ajustado para posicionarlo al lado del cart (30 + 70 + 10 de espacio) */
+      width: 70px;
+      height: 70px;
       background: linear-gradient(135deg, var(--primary), var(--secondary));
       border-radius: 50%;
       display: flex;
@@ -2666,7 +2693,7 @@ $totalAgotados = $resultadoAgotados->num_rows;
     .chatbot-widget {
       position: fixed;
       bottom: 100px;
-      right: 30px;
+      right: 100px;  /* Ajustado para alinearse con el icono del chat */
       width: 350px;
       height: 500px;
       background: var(--card-bg);
@@ -2812,13 +2839,13 @@ $totalAgotados = $resultadoAgotados->num_rows;
     @media (max-width: 768px) {
       .chatbot-widget {
         width: 300px;
-        right: 15px;
+        right: 95px; /* Ajustado para alinearse con el icono del chat */
         bottom: 90px;
       }
       
       .chat-icon {
         bottom: 20px;
-        right: 20px;
+        right: 100px; /* Ajustado para posicionarlo al lado del cart */
         width: 55px;
         height: 55px;
       }
@@ -2906,8 +2933,10 @@ $totalAgotados = $resultadoAgotados->num_rows;
       
       // Función para obtener respuesta del bot
       function getBotResponse(message) {
-        // Convertir mensaje a minúsculas para coincidencia
-        const lowerMessage = message.toLowerCase();
+        // Convertir mensaje a minúsculas para coincidencia y limpiar caracteres especiales
+        let lowerMessage = message.toLowerCase();
+        // Remover caracteres especiales y reemplazar con espacios para mejorar la detección de palabras
+        lowerMessage = lowerMessage.replace(/[^\w\s]/g, ' ');
         
         // Definir respuestas básicas
         let response = "Lo siento, no entiendo tu mensaje. ¿Podrías reformularlo o preguntarme algo sobre nuestros productos de salud?";
@@ -3048,7 +3077,28 @@ $totalAgotados = $resultadoAgotados->num_rows;
           'devolver': "Aceptamos devoluciones dentro de los 30 días siguientes a la compra, siempre que el producto esté en condiciones originales.",
           'promoción': "Consulta nuestra sección de promociones para ver los productos con descuento actualmente disponibles.",
           'promocion': "Consulta nuestra sección de promociones para ver los productos con descuento actualmente disponibles.",
-          'oferta': "Consulta nuestra sección de promociones para ver los productos con descuento actualmente disponibles."
+          'oferta': "Consulta nuestra sección de promociones para ver los productos con descuento actualmente disponibles.",
+          'devoluciones': "Aceptamos devoluciones dentro de los 30 días siguientes a la compra, siempre que el producto esté en condiciones originales.",
+          'reembolso': "Aceptamos devoluciones dentro de los 30 días siguientes a la compra, siempre que el producto esté en condiciones originales.",
+          'atencion al cliente': "Puedes contactarnos por email en atencion@saludperfecta.com o por teléfono al +51 987 654 321.",
+          'atención al cliente': "Puedes contactarnos por email en atencion@saludperfecta.com o por teléfono al +51 987 654 321.",
+          'servicio al cliente': "Puedes contactarnos por email en atencion@saludperfecta.com o por teléfono al +51 987 654 321.",
+          'ayuda con pedido': "Para consultas sobre tu pedido, puedes contactarnos por email en atencion@saludperfecta.com o por teléfono al +51 987 654 321.",
+          'estado de pedido': "Para consultar el estado de tu pedido, puedes contactarnos por email en atencion@saludperfecta.com o por teléfono al +51 987 654 321.",
+          'seguimiento': "Para consultar el estado de tu pedido, puedes contactarnos por email en atencion@saludperfecta.com o por teléfono al +51 987 654 321.",
+          'tracking': "Para consultar el estado de tu pedido, puedes contactarnos por email en atencion@saludperfecta.com o por teléfono al +51 987 654 321.",
+          'pago': "Aceptamos diversos métodos de pago, incluyendo tarjetas de crédito, débito y transferencia bancaria. Todos los pagos son seguros.",
+          'metodos de pago': "Aceptamos diversos métodos de pago, incluyendo tarjetas de crédito, débito y transferencia bancaria. Todos los pagos son seguros.",
+          'métodos de pago': "Aceptamos diversos métodos de pago, incluyendo tarjetas de crédito, débito y transferencia bancaria. Todos los pagos son seguros.",
+          'seguridad': "Tus datos personales y de pago están completamente seguros con nosotros. Usamos encriptación SSL y seguimos estrictos protocolos de seguridad.",
+          'privacidad': "Garantizamos la privacidad y protección de tus datos personales según la ley de protección de datos vigente.",
+          'buenas dias': "¡Buenos días! ¿En qué puedo ayudarte con tu salud hoy?",
+          'como estás': "¡Estoy bien, gracias! Listo para ayudarte con tus consultas de salud. ¿En qué te puedo asistir?",
+          'adiós': "¡Cuídate! Recuerda consultar siempre con un profesional de la salud si los síntomas persisten.",
+          'cuentame': "Puedo ayudarte con información sobre nuestros productos de salud, horarios de atención, o cualquier duda que tengas.",
+          'para que sirve': "Para conocer para qué sirve un producto específico, puedes mencionar el nombre del producto para que te proporcione información detallada.",
+          'informacion': "Puedo proporcionarte información sobre nuestros productos de salud, horarios de atención, o cualquier duda que tengas.",
+          'detalles': "Puedo proporcionarte detalles sobre nuestros productos de salud, horarios de atención, o cualquier duda que tengas."
         };
         
         // Buscar coincidencias exactas en orden de longitud (de más largas a más cortas)
@@ -3065,14 +3115,14 @@ $totalAgotados = $resultadoAgotados->num_rows;
         // Si no se encontró una coincidencia específica, verificar si el usuario está preguntando por un producto
         if (response.includes("no entiendo tu mensaje")) {
           // Verificar si el mensaje contiene palabras clave que indiquen que está buscando un producto
-          const palabrasProducto = ['túnez', 'taladro', 'producto', '¿qué es', '¿qué es un', '¿qué es una', '¿qué es el', '¿qué es la', 'qué es', 'cuéntame', 'información', 'sobre', 'describe', 'descripción', 'característica', 'características', 'para qué sirve', 'beneficios', 'efectos', 'efectos secundarios', 'ingredientes'];
+          const palabrasProducto = ['túnez', 'taladro', 'producto', '¿qué es', '¿qué es un', '¿qué es una', '¿qué es el', '¿qué es la', 'qué es', 'cuéntame', 'cuentame', 'información', 'informacion', 'sobre', 'describe', 'descripción', 'característica', 'características', 'para qué sirve', 'para que sirve', 'beneficios', 'efectos', 'efectos secundarios', 'ingredientes'];
           
           const tienePalabraProducto = palabrasProducto.some(palabra => lowerMessage.includes(palabra));
           
           if (tienePalabraProducto) {
             // Buscar si hay una palabra que podría ser un nombre de producto
             const palabras = lowerMessage.split(/\s+/);
-            const palabrasComunes = ['un', 'una', 'el', 'la', 'de', 'que', 'es', 'y', 'cuéntame', 'información', 'sobre', 'describe', 'qué', 'por', 'para', 'qué', 'es', 'un', 'una', 'el', 'la', 'en', 'al', 'con', 'le', 'les', 'se', 'me', 'te', 'le', 'nos', 'os'];
+            const palabrasComunes = ['un', 'una', 'el', 'la', 'de', 'que', 'es', 'y', 'cuéntame', 'cuentame', 'información', 'informacion', 'sobre', 'describe', 'qué', 'por', 'para', 'qué', 'es', 'un', 'una', 'el', 'la', 'en', 'al', 'con', 'le', 'les', 'se', 'me', 'te', 'le', 'nos', 'os'];
             
             let productoBuscado = '';
             for (const palabra of palabras) {
