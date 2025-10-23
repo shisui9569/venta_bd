@@ -188,11 +188,37 @@ try {
     $id_pedido = $stmtPedido->insert_id;
     $stmtPedido->close();
 
+    // Verificar si la columna envio_gratis existe en detalle_pedido, si no, agregarla
+    $result = $conexion->query("SHOW COLUMNS FROM detalle_pedido LIKE 'envio_gratis'");
+    if ($result->num_rows == 0) {
+        $alter_result = $conexion->query("ALTER TABLE detalle_pedido ADD COLUMN envio_gratis BOOLEAN DEFAULT FALSE");
+        if (!$alter_result) {
+            die("❌ Error al crear columna envio_gratis en detalle_pedido: " . $conexion->error);
+        }
+    }
+
     // DETALLE
-    $stmtDet = $conexion->prepare("INSERT INTO detalle_pedido (id_pedido,id_producto,nombre_producto,cantidad,precio_unitario,subtotal) VALUES (?,?,?,?,?,?)");
+    $stmtDet = $conexion->prepare("INSERT INTO detalle_pedido (id_pedido,id_producto,nombre_producto,cantidad,precio_unitario,subtotal,envio_gratis) VALUES (?,?,?,?,?,?,?)");
+    
+    // Obtener información de envío gratis de los productos en el carrito
+    $productosConEnvioGratis = [];
+    if (!empty($_SESSION['carrito'])) {
+        $ids = array_map(fn($item) => $item['id'], $_SESSION['carrito']);
+        $placeholders = str_repeat('?', count($ids));
+        $stmt = $conexion->prepare("SELECT id_producto, envio_gratis FROM productos WHERE id_producto IN ($placeholders)");
+        $stmt->bind_param(str_repeat('i', count($ids)), ...$ids);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
+        while ($row = $result->fetch_assoc()) {
+            $productosConEnvioGratis[$row['id_producto']] = $row['envio_gratis'];
+        }
+    }
+    
     foreach ($_SESSION['carrito'] as $item) {
         $subtotal = $item['precio'] * $item['cantidad'];
-        $stmtDet->bind_param("iissdd",$id_pedido,$item['id'],$item['nombre'],$item['cantidad'],$item['precio'],$subtotal);
+        $envio_gratis = isset($productosConEnvioGratis[$item['id']]) ? ($productosConEnvioGratis[$item['id']] ? 1 : 0) : 0;
+        $stmtDet->bind_param("iisiidi",$id_pedido,$item['id'],$item['nombre'],$item['cantidad'],$item['precio'],$subtotal,$envio_gratis);
         $stmtDet->execute();
     }
     $stmtDet->close();

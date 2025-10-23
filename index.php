@@ -939,6 +939,7 @@ $totalAgotados = $resultadoAgotados->num_rows;
       letter-spacing: 0.8px;
       color: var(--light-text);
       box-shadow: 0 4px 12px rgba(5, 150, 105, 0.3);
+      z-index: 10;
     }
 
     .product-details {

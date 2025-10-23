@@ -24,6 +24,12 @@ $pedido = $result->fetch_assoc();
 // Verificar si existe la tabla de detalle_pedido
 $check_detail_table = $conexion->query("SHOW TABLES LIKE 'detalle_pedido'");
 if ($check_detail_table->num_rows > 0) {
+    // Verificar si la columna envio_gratis existe en detalle_pedido, si no, agregarla
+    $result = $conexion->query("SHOW COLUMNS FROM detalle_pedido LIKE 'envio_gratis'");
+    if ($result->num_rows == 0) {
+        $conexion->query("ALTER TABLE detalle_pedido ADD COLUMN envio_gratis BOOLEAN DEFAULT FALSE");
+    }
+    
     // Obtener detalles del pedido
     $sql_detalle = "SELECT * FROM detalle_pedido WHERE pedido_id = ?";
     $stmt_detalle = $conexion->prepare($sql_detalle);
@@ -223,6 +229,7 @@ if ($check_detail_table->num_rows > 0) {
                             <th>Cantidad</th>
                             <th>Precio Unitario</th>
                             <th>Subtotal</th>
+                            <th>Envío</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -232,6 +239,13 @@ if ($check_detail_table->num_rows > 0) {
                                 <td><?= $detalle['cantidad'] ?></td>
                                 <td>S/ <?= number_format($detalle['precio_unitario'], 2) ?></td>
                                 <td>S/ <?= number_format($detalle['cantidad'] * $detalle['precio_unitario'], 2) ?></td>
+                                <td>
+                                    <?php if ($detalle['envio_gratis']): ?>
+                                        <span style="color: green; font-weight: bold;"><i class="fas fa-truck"></i> Gratis</span>
+                                    <?php else: ?>
+                                        <span style="color: #666;">Con cargo</span>
+                                    <?php endif; ?>
+                                </td>
                             </tr>
                         <?php endwhile; ?>
                     </tbody>

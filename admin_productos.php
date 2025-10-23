@@ -104,9 +104,17 @@ if (isset($_POST['accion']) && $_POST['accion'] === 'agregar') {
     } else {
         $checkQuery->close();
         
-        $stmt = $conexion->prepare("INSERT INTO productos (nombre, descripcion, categoria, precio_venta, precio_regular, descuento_porcentaje, descuento_monto, en_oferta, fecha_inicio_oferta, fecha_fin_oferta, imagen, stock) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        // Verificar si la columna envio_gratis existe, si no, agregarla
+        $result = $conexion->query("SHOW COLUMNS FROM productos LIKE 'envio_gratis'");
+        if ($result->num_rows == 0) {
+            $conexion->query("ALTER TABLE productos ADD COLUMN envio_gratis BOOLEAN DEFAULT FALSE");
+        }
+        
+        $envio_gratis = isset($_POST['envio_gratis']) ? 1 : 0;
+        
+        $stmt = $conexion->prepare("INSERT INTO productos (nombre, descripcion, categoria, precio_venta, precio_regular, descuento_porcentaje, descuento_monto, en_oferta, fecha_inicio_oferta, fecha_fin_oferta, imagen, stock, envio_gratis) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
         if ($stmt) {
-            $stmt->bind_param("sssdddddssss", $nombre, $descripcion, $categoria, $precio, $precio_regular, $descuento_porcentaje, $descuento_monto, $en_oferta, $fecha_inicio_oferta, $fecha_fin_oferta, $imagenNombre, $stock);
+            $stmt->bind_param("sssdddddssssi", $nombre, $descripcion, $categoria, $precio, $precio_regular, $descuento_porcentaje, $descuento_monto, $en_oferta, $fecha_inicio_oferta, $fecha_fin_oferta, $imagenNombre, $stock, $envio_gratis);
             if ($stmt->execute()) {
                 // Redirigir para limpiar POST y prevenir reenvío
                 header("Location: admin_productos.php?success=1");
@@ -209,12 +217,20 @@ if (isset($_POST['accion']) && $_POST['accion'] === 'editar') {
 
         // Si no hay errores, proceder con la actualización
         if (empty($mensaje) || !$error_imagen) {
+            // Verificar si la columna envio_gratis existe, si no, agregarla
+            $result = $conexion->query("SHOW COLUMNS FROM productos LIKE 'envio_gratis'");
+            if ($result->num_rows == 0) {
+                $conexion->query("ALTER TABLE productos ADD COLUMN envio_gratis BOOLEAN DEFAULT FALSE");
+            }
+            
+            $envio_gratis = isset($_POST['envio_gratis']) ? 1 : 0;
+            
             if ($actualizarImagen) {
                 // CONSULTA CON IMAGEN - CORREGIDO
-                $stmt = $conexion->prepare("UPDATE productos SET nombre=?, descripcion=?, categoria=?, precio_venta=?, precio_regular=?, descuento_porcentaje=?, descuento_monto=?, en_oferta=?, fecha_inicio_oferta=?, fecha_fin_oferta=?, imagen=?, stock=? WHERE id_producto=?");
+                $stmt = $conexion->prepare("UPDATE productos SET nombre=?, descripcion=?, categoria=?, precio_venta=?, precio_regular=?, descuento_porcentaje=?, descuento_monto=?, en_oferta=?, fecha_inicio_oferta=?, fecha_fin_oferta=?, imagen=?, stock=?, envio_gratis=? WHERE id_producto=?");
                 if ($stmt) {
-                    // CORRECCIÓN: Tipos corregidos - 13 parámetros: s=string, d=double, i=integer
-                    $stmt->bind_param("sssdddddssssi", 
+                    // CORRECCIÓN: Tipos corregidos - 14 parámetros: s=string, d=double, i=integer
+                    $stmt->bind_param("sssdddddssssii", 
                         $nombre, 
                         $descripcion, 
                         $categoria, 
@@ -227,6 +243,7 @@ if (isset($_POST['accion']) && $_POST['accion'] === 'editar') {
                         $fecha_fin_oferta, 
                         $nuevaImagen, 
                         $stock, 
+                        $envio_gratis, 
                         $id
                     );
                     
@@ -249,10 +266,10 @@ if (isset($_POST['accion']) && $_POST['accion'] === 'editar') {
                 }
             } else {
                 // CONSULTA SIN IMAGEN - CORREGIDO
-                $stmt = $conexion->prepare("UPDATE productos SET nombre=?, descripcion=?, categoria=?, precio_venta=?, precio_regular=?, descuento_porcentaje=?, descuento_monto=?, en_oferta=?, fecha_inicio_oferta=?, fecha_fin_oferta=?, stock=? WHERE id_producto=?");
+                $stmt = $conexion->prepare("UPDATE productos SET nombre=?, descripcion=?, categoria=?, precio_venta=?, precio_regular=?, descuento_porcentaje=?, descuento_monto=?, en_oferta=?, fecha_inicio_oferta=?, fecha_fin_oferta=?, stock=?, envio_gratis=? WHERE id_producto=?");
                 if ($stmt) {
-                    // CORRECCIÓN: Tipos corregidos - 12 parámetros
-                    $stmt->bind_param("sssdddddssii", 
+                    // CORRECCIÓN: Tipos corregidos - 13 parámetros
+                    $stmt->bind_param("sssdddddssiii", 
                         $nombre, 
                         $descripcion, 
                         $categoria, 
@@ -264,6 +281,7 @@ if (isset($_POST['accion']) && $_POST['accion'] === 'editar') {
                         $fecha_inicio_oferta, 
                         $fecha_fin_oferta, 
                         $stock, 
+                        $envio_gratis, 
                         $id
                     );
                     
@@ -382,9 +400,15 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     header('Content-Disposition: attachment; filename=productos_export_' . date('Ymd_His') . '.csv');
 
     $output = fopen('php://output', 'w');
-    fputcsv($output, ['ID', 'Nombre', 'Descripcion', 'Categoria', 'Precio Regular', 'Precio Venta', 'Descuento %', 'Descuento Monto', 'En Oferta', 'Stock', 'Imagen']);
+    fputcsv($output, ['ID', 'Nombre', 'Descripcion', 'Categoria', 'Precio Regular', 'Precio Venta', 'Descuento %', 'Descuento Monto', 'En Oferta', 'Envio Gratis', 'Stock', 'Imagen']);
 
-    $res = $conexion->query("SELECT id_producto, nombre, descripcion, categoria, precio_regular, precio_venta, descuento_porcentaje, descuento_monto, en_oferta, stock, imagen FROM productos ORDER BY id_producto DESC");
+    // Verificar si la columna envio_gratis existe, si no, agregarla
+    $result = $conexion->query("SHOW COLUMNS FROM productos LIKE 'envio_gratis'");
+    if ($result->num_rows == 0) {
+        $conexion->query("ALTER TABLE productos ADD COLUMN envio_gratis BOOLEAN DEFAULT FALSE");
+    }
+    
+    $res = $conexion->query("SELECT id_producto, nombre, descripcion, categoria, precio_regular, precio_venta, descuento_porcentaje, descuento_monto, en_oferta, envio_gratis, stock, imagen FROM productos ORDER BY id_producto DESC");
     while ($row = $res->fetch_assoc()) {
         fputcsv($output, [
             $row['id_producto'],
@@ -396,6 +420,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
             $row['descuento_porcentaje'],
             $row['descuento_monto'],
             $row['en_oferta'] ? 'Sí' : 'No',
+            $row['envio_gratis'] ? 'Sí' : 'No',
             $row['stock'],
             $row['imagen']
         ]);
@@ -426,7 +451,13 @@ $totalRow = $totalRes->fetch_assoc();
 $totalItems = intval($totalRow['total']);
 $totalPages = max(1, ceil($totalItems / $perPage));
 
-$listQuery = "SELECT id_producto, nombre, descripcion, categoria, precio_venta, precio_regular, descuento_porcentaje, descuento_monto, en_oferta, fecha_inicio_oferta, fecha_fin_oferta, stock, imagen FROM productos WHERE $where ORDER BY id_producto DESC LIMIT $perPage OFFSET $offset";
+// Verificar si la columna envio_gratis existe, si no, agregarla
+$result = $conexion->query("SHOW COLUMNS FROM productos LIKE 'envio_gratis'");
+if ($result->num_rows == 0) {
+    $conexion->query("ALTER TABLE productos ADD COLUMN envio_gratis BOOLEAN DEFAULT FALSE");
+}
+
+$listQuery = "SELECT id_producto, nombre, descripcion, categoria, precio_venta, precio_regular, descuento_porcentaje, descuento_monto, en_oferta, fecha_inicio_oferta, fecha_fin_oferta, stock, imagen, envio_gratis FROM productos WHERE $where ORDER BY id_producto DESC LIMIT $perPage OFFSET $offset";
 $resultado = $conexion->query($listQuery);
 
 $catStats = [];
@@ -752,6 +783,7 @@ function badgeClassForCategory($cat) {
                 <th class="p-3 text-left text-custom-primary">Descuento</th>
                 <th class="p-3 text-left text-custom-primary">Precio Final</th>
                 <th class="p-3 text-left text-custom-primary">Stock</th>
+                <th class="p-3 text-left text-custom-primary">Envío</th>
                 <th class="p-3 text-left text-custom-primary">Imagen</th>
                 <th class="p-3 text-left text-custom-primary">Acciones</th>
               </tr>
@@ -808,6 +840,17 @@ function badgeClassForCategory($cat) {
                         <span class="px-2 py-1 rounded text-sm bg-green-100 text-green-700"><?= (int)$p['stock'] ?></span>
                       <?php endif; ?>
                     </td>
+                    <td class="p-3 text-center">
+                      <?php if ($p['envio_gratis']): ?>
+                        <span class="px-2 py-1 rounded-full text-xs bg-green-100 text-green-700">
+                          <i class="fas fa-truck"></i> Gratis
+                        </span>
+                      <?php else: ?>
+                        <span class="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-700">
+                          <i class="fas fa-truck"></i> Pago
+                        </span>
+                      <?php endif; ?>
+                    </td>
                     <td class="p-3">
                       <?php if (!empty($p['imagen']) && file_exists($p['imagen'])): ?>
                         <img src="<?= htmlspecialchars($p['imagen']) ?>" alt="" class="h-14 w-14 object-cover rounded" />
@@ -829,6 +872,7 @@ function badgeClassForCategory($cat) {
                           data-descuento_porcentaje="<?= htmlspecialchars($p['descuento_porcentaje'] ?? 0, ENT_QUOTES) ?>"
                           data-descuento_monto="<?= htmlspecialchars($p['descuento_monto'] ?? 0, ENT_QUOTES) ?>"
                           data-en_oferta="<?= htmlspecialchars($p['en_oferta'] ?? 0, ENT_QUOTES) ?>"
+                          data-envio_gratis="<?= htmlspecialchars($p['envio_gratis'] ?? 0, ENT_QUOTES) ?>"
                           data-fecha_inicio_oferta="<?= htmlspecialchars($p['fecha_inicio_oferta'] ?? '', ENT_QUOTES) ?>"
                           data-fecha_fin_oferta="<?= htmlspecialchars($p['fecha_fin_oferta'] ?? '', ENT_QUOTES) ?>"
                           data-stock="<?= (int)$p['stock'] ?>"
@@ -927,6 +971,11 @@ function badgeClassForCategory($cat) {
         <div class="flex items-center space-x-2 md:col-span-2">
           <input id="formEnOferta" name="en_oferta" type="checkbox" class="h-5 w-5 text-indigo-600 rounded focus:ring-indigo-500" />
           <label class="text-sm font-medium text-custom-primary">En Oferta</label>
+        </div>
+
+        <div class="flex items-center space-x-2 md:col-span-2">
+          <input id="formEnvioGratis" name="envio_gratis" type="checkbox" class="h-5 w-5 text-indigo-600 rounded focus:ring-indigo-500" />
+          <label class="text-sm font-medium text-custom-primary">Envío Gratis</label>
         </div>
 
         <div class="space-y-2">
@@ -1110,6 +1159,7 @@ function badgeClassForCategory($cat) {
       const descuento_porcentaje = btn.dataset.descuento_porcentaje;
       const descuento_monto = btn.dataset.descuento_monto;
       const en_oferta = btn.dataset.en_oferta;
+      const envio_gratis = btn.dataset.envio_gratis;
       const fecha_inicio_oferta = btn.dataset.fecha_inicio_oferta;
       const fecha_fin_oferta = btn.dataset.fecha_fin_oferta;
       const stock = btn.dataset.stock;
@@ -1127,6 +1177,7 @@ function badgeClassForCategory($cat) {
       document.getElementById('formPrecio').value = precio;
       document.getElementById('formStock').value = stock;
       document.getElementById('formEnOferta').checked = en_oferta == '1';
+      document.getElementById('formEnvioGratis').checked = envio_gratis == '1';
       document.getElementById('formFechaInicioOferta').value = fecha_inicio_oferta;
       document.getElementById('formFechaFinOferta').value = fecha_fin_oferta;
       
