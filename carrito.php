@@ -64,24 +64,32 @@ foreach ($_SESSION['carrito'] as $item) {
     }
 }
 
-// Calcular envío considerando productos con envío gratis
+// Calcular envío considerando productos con y sin envío gratis
 $envio = 0;
-$hay_envio_gratis_global = true; // Asumimos que todos tienen envío gratis hasta probar lo contrario
 
 if (!empty($_SESSION['carrito'])) {
+    $hay_producto_con_envio_gratis = false;
+    
+    // Verificar si hay al menos un producto con envío gratis
     foreach ($_SESSION['carrito'] as $item) {
         $producto_id = $item['id'];
-        if (isset($productosConInfo[$producto_id]) && !$productosConInfo[$producto_id]['envio_gratis']) {
-            $hay_envio_gratis_global = false; // Si cualquier producto no tiene envío gratis, todo el pedido requiere envío
+        if (isset($productosConInfo[$producto_id]) && $productosConInfo[$producto_id]['envio_gratis']) {
+            $hay_producto_con_envio_gratis = true;
             break;
         }
     }
     
-    // Si no todos los productos tienen envío gratis, calcular el envío normal
-    if (!$hay_envio_gratis_global) {
-        $envio = $total >= 100 ? 0 : 20; // Ofrecer envío gratis por compras >= 100 soles
+    // Si hay al menos un producto con envío gratis, todo el pedido es envío gratis
+    if (!$hay_producto_con_envio_gratis) {
+        // Si NO hay ningún producto con envío gratis, cobrar S/ 15 por cada producto
+        foreach ($_SESSION['carrito'] as $item) {
+            $producto_id = $item['id'];
+            if (isset($productosConInfo[$producto_id]) && !$productosConInfo[$producto_id]['envio_gratis']) {
+                $envio += 15; // S/ 15 por cada producto que no tenga envío gratis
+            }
+        }
     }
-    // Si todos los productos tienen envío gratis, $envio ya es 0
+    // Si hay al menos un producto con envío gratis, entonces todo el pedido tiene envío gratis (envio = 0)
 }
 
 $gran_total = $total + $envio;
@@ -798,7 +806,7 @@ $gran_total = $total + $envio;
                                                     // Mostrar indicador de envío gratis si el producto lo tiene
                                                     if (isset($productosConInfo[$item['id']]) && $productosConInfo[$item['id']]['envio_gratis']): 
                                                     ?>
-                                                        <p class=\"envio-gratis-indicator\" style=\"color: #007bff; font-weight: bold; margin: 5px 0;\">
+                                                        <p class=\"envio-gratis-indicator\" style=\"color: #007bff; font-weight: bold; margin: 5px 0; font-size: 0.9em;\">
                                                             <i class=\"fas fa-truck\"></i> ¡Envío Gratis!
                                                         </p>
                                                     <?php endif; ?>
@@ -1105,14 +1113,17 @@ $gran_total = $total + $envio;
                 <?php if ($envio > 0): ?>
                 <div style="margin-top: 15px; text-align: center; font-size: 14px; color: #666;">
                     <i class="fas fa-truck"></i> 
-                    ¡Faltan S/ <?= number_format(100 - $total, 2) ?> para envío GRATIS!
+                    Delivery: S/ <?= number_format($envio, 2) ?>
                 </div>
                 <?php else: ?>
                 <div style="margin-top: 15px; text-align: center; font-size: 14px; color: #28a745;">
                     <i class="fas fa-check-circle"></i> 
-                    ¡Felicidades! Tienes Delivery GRATIS
+                    ¡Tienes Delivery GRATIS!
                 </div>
                 <?php endif; ?>
+                <div style="margin-top: 8px; text-align: center; font-size: 12px; color: #666; font-style: italic;">
+                    *<?= $envio == 0 ? '¡Envío gratis por tener un producto con envío gratis!' : 'S/ 15 por producto sin envío gratis' ?>
+                </div>
                 
                 <button class="btn-primary" id="continuar-btn" onclick="nextToStep(1)" <?= empty($_SESSION['carrito']) ? 'disabled' : '' ?> style="width: 100%;">
                     <?= empty($_SESSION['carrito']) ? 'Carrito Vacío' : 'Continuar con la compra' ?>
