@@ -25,18 +25,27 @@ if (isset($_GET['remove'])) {
     exit();
 }
 
-// Obtener imágenes de los productos desde la base de datos
-$productosConImagenes = [];
+// Verificar si la columna envio_gratis existe, si no, agregarla
+$result = $conexion->query("SHOW COLUMNS FROM productos LIKE 'envio_gratis'");
+if ($result->num_rows == 0) {
+    $conexion->query("ALTER TABLE productos ADD COLUMN envio_gratis BOOLEAN DEFAULT FALSE");
+}
+
+// Obtener imágenes y envío gratis de los productos desde la base de datos
+$productosConInfo = [];
 if (!empty($_SESSION['carrito'])) {
     $ids = array_map(fn($item) => $item['id'], $_SESSION['carrito']);
     $placeholders = str_repeat('?,', count($ids) - 1) . '?';
-    $stmt = $conexion->prepare("SELECT id_producto, imagen FROM productos WHERE id_producto IN ($placeholders)");
+    $stmt = $conexion->prepare("SELECT id_producto, imagen, envio_gratis FROM productos WHERE id_producto IN ($placeholders)");
     $stmt->bind_param(str_repeat('i', count($ids)), ...$ids);
     $stmt->execute();
     $result = $stmt->get_result();
     
     while ($row = $result->fetch_assoc()) {
-        $productosConImagenes[$row['id_producto']] = $row['imagen'];
+        $productosConInfo[$row['id_producto']] = [
+            'imagen' => $row['imagen'],
+            'envio_gratis' => $row['envio_gratis']
+        ];
     }
 }
 
@@ -55,7 +64,26 @@ foreach ($_SESSION['carrito'] as $item) {
     }
 }
 
-$envio = $total >= 2000 ? 0 : 15;
+// Calcular envío considerando productos con envío gratis
+$envio = 0;
+$hay_envio_gratis_global = true; // Asumimos que todos tienen envío gratis hasta probar lo contrario
+
+if (!empty($_SESSION['carrito'])) {
+    foreach ($_SESSION['carrito'] as $item) {
+        $producto_id = $item['id'];
+        if (isset($productosConInfo[$producto_id]) && !$productosConInfo[$producto_id]['envio_gratis']) {
+            $hay_envio_gratis_global = false; // Si cualquier producto no tiene envío gratis, todo el pedido requiere envío
+            break;
+        }
+    }
+    
+    // Si no todos los productos tienen envío gratis, calcular el envío normal
+    if (!$hay_envio_gratis_global) {
+        $envio = $total >= 100 ? 0 : 20; // Ofrecer envío gratis por compras >= 100 soles
+    }
+    // Si todos los productos tienen envío gratis, $envio ya es 0
+}
+
 $gran_total = $total + $envio;
 ?>
 <!DOCTYPE html>
@@ -673,7 +701,7 @@ $gran_total = $total + $envio;
     <header class="commercial-header">
         <div class="commercial-header-container">
             <div class="header-top">
-                <div class="commercial-logo">Salud<span>Perfecta</span></div>
+                <div class="commercial-logo">Salud<span>Perfecta</span></div> 
                 
                 <nav class="commercial-nav" id="commercialNav">
                     <a href="index.php" class="commercial-nav-item">
@@ -751,7 +779,7 @@ $gran_total = $total + $envio;
                                         <td>
                                             <div class="product-info">
                                                 <?php 
-                                                $imagen = isset($productosConImagenes[$item['id']]) ? $productosConImagenes[$item['id']] : '';
+                                                $imagen = isset($productosConInfo[$item['id']]) ? $productosConInfo[$item['id']]['imagen'] : '';
                                                 if (!empty($imagen)): 
                                                 ?>
                                                     <img src="<?= htmlspecialchars($imagen) ?>" 
@@ -766,12 +794,20 @@ $gran_total = $total + $envio;
                                                 <div class="product-details">
                                                     <h4><?= htmlspecialchars($item['nombre']) ?></h4>
                                                     <p>Código: <?= $item['id'] ?></p>
+                                                    <?php 
+                                                    // Mostrar indicador de envío gratis si el producto lo tiene
+                                                    if (isset($productosConInfo[$item['id']]) && $productosConInfo[$item['id']]['envio_gratis']): 
+                                                    ?>
+                                                        <p class=\"envio-gratis-indicator\" style=\"color: #007bff; font-weight: bold; margin: 5px 0;\">
+                                                            <i class=\"fas fa-truck\"></i> ¡Envío Gratis!
+                                                        </p>
+                                                    <?php endif; ?>
                                                     <?php if (isset($item['precio_regular']) && $item['precio_regular'] > $item['precio']): ?>
                                                         <p class="text-danger">
                                                             <small>
                                                                 <s>Precio regular: S/ <?= number_format($item['precio_regular'], 2) ?></s>
                                                                 <br>
-                                                                <strong>Ahorras: S/ <?= number_format(($item['precio_regular'] - $item['precio']) * $item['cantidad'], 2) ?></strong>
+                                                                <strong id="savings-<?= $item['id'] ?>">Ahorras: S/ <?= number_format(($item['precio_regular'] - $item['precio']) * $item['cantidad'], 2) ?></strong>
                                                             </small>
                                                         </p>
                                                     <?php endif; ?>
@@ -793,10 +829,14 @@ $gran_total = $total + $envio;
                                             <div class="quantity-control">
                                                 <input type="number" name="cantidad[<?= $item['id'] ?>]" 
                                                        value="<?= $item['cantidad'] ?>" min="1" 
-                                                       class="quantity-input">
+                                                       class="quantity-input" 
+                                                       data-id="<?= $item['id'] ?>" 
+                                                       data-price="<?= $item['precio'] ?>" 
+                                                       data-regular-price="<?= $item['precio_regular'] ?? $item['precio'] ?>"
+                                                       id="qty-<?= $item['id'] ?>">
                                             </div>
                                         </td>
-                                        <td>S/ <?= number_format($item['precio'] * $item['cantidad'], 2) ?></td>
+                                        <td id="subtotal-<?= $item['id'] ?>">S/ <?= number_format($item['precio'] * $item['cantidad'], 2) ?></td>
                                         <td>
                                             <div class="actions">
                                                 <button type="button" class="btn-small btn-danger" 
@@ -1047,7 +1087,7 @@ $gran_total = $total + $envio;
                 <?php endif; ?>
                 
                 <div class="summary-line">
-                    <span>Envío:</span>
+                    <span>Delivery:</span>
                     <span class="<?= $envio == 0 ? 'shipping-free' : 'shipping-cost' ?>">
                         <?php if ($envio == 0): ?>
                             GRATIS
@@ -1065,12 +1105,12 @@ $gran_total = $total + $envio;
                 <?php if ($envio > 0): ?>
                 <div style="margin-top: 15px; text-align: center; font-size: 14px; color: #666;">
                     <i class="fas fa-truck"></i> 
-                    ¡Faltan S/ <?= number_format(2000 - $total, 2) ?> para envío GRATIS!
+                    ¡Faltan S/ <?= number_format(100 - $total, 2) ?> para envío GRATIS!
                 </div>
                 <?php else: ?>
                 <div style="margin-top: 15px; text-align: center; font-size: 14px; color: #28a745;">
                     <i class="fas fa-check-circle"></i> 
-                    ¡Felicidades! Tienes envío GRATIS
+                    ¡Felicidades! Tienes Delivery GRATIS
                 </div>
                 <?php endif; ?>
                 
@@ -1090,37 +1130,255 @@ $gran_total = $total + $envio;
     <script>
         // Datos de departamentos, provincias y distritos del Perú
         const ubicacionesPeru = {
-            "Lima": {
-                "Lima": ["Lima", "Ancón", "Ate", "Barranco", "Breña", "Carabayllo", "Chaclacayo", "Chorrillos", "Cieneguilla", "Comas", "El Agustino", "Independencia", "Jesús María", "La Molina", "La Victoria", "Lince", "Los Olivos", "Lurigancho", "Lurín", "Magdalena", "Miraflores", "Pachacamac", "Pucusana", "Pueblo Libre", "Puente Piedra", "Punta Hermosa", "Punta Negra", "Rímac", "San Bartolo", "San Borja", "San Isidro", "San Juan de Lurigancho", "San Juan de Miraflores", "San Luis", "San Martín", "San Miguel", "Santa Anita", "Santa María", "Santa Rosa", "Santiago", "Surco", "Surquillo", "Villa El Salvador", "Villa María"],
-                "Huaura": ["Huacho", "Ambar", "Caleta", "Checras", "Hualmay", "Huaura", "Leoncio Prado", "Paccho", "Santa Leonor", "Santa María", "Sayan", "Vegueta"],
-                "Cañete": ["San Vicente", "Asia", "Calango", "Cerro Azul", "Chilca", "Coayllo", "Imperial", "Lunahuana", "Mala", "Nuevo Imperial", "Pacaran", "Quilmana", "San Antonio", "San Luis", "Santa Cruz", "Zúñiga"]
-            },
-            "Arequipa": {
-                "Arequipa": ["Arequipa", "Alto Selva Alegre", "Cayma", "Cerro Colorado", "Characato", "Chiguata", "Jacobo Hunter", "La Joya", "Mariano Melgar", "Miraflores", "Mollebaya", "Paucarpata", "Pocsi", "Polobaya", "Quequeña", "Sabandia", "Sachaca", "San Juan de Siguas", "San Juan de Tarucani", "Santa Isabel", "Santa Rita", "Socabaya", "Tiabaya", "Uchumayo", "Vitor", "Yanahuara", "Yarabamba", "Yura"]
-            },
-            "Cusco": {
-                "Cusco": ["Cusco", "Ccorca", "Poroy", "San Jerónimo", "San Sebastian", "Santiago", "Saylla", "Wanchaq"]
-            },
-            "La Libertad": {
-                "Trujillo": ["Trujillo", "El Porvenir", "Florencia de Mora", "Huanchaco", "La Esperanza", "Laredo", "Moche", "Poroto", "Salaverry", "Simbal", "Victor Larco"]
-            },
-            "Piura": {
-                "Piura": ["Piura", "Castilla", "Catacaos", "Cura Mori", "El Tallan", "La Arena", "La Unión", "Las Lomas", "Tambo Grande"]
-            },
-            "Lambayeque": {
-                "Chiclayo": ["Chiclayo", "Chongoyape", "Eten", "Eten Puerto", "José Leonardo Ortiz", "La Victoria", "Lagunas", "Monsefú", "Nueva Arica", "Oyotún", "Picsi", "Pimentel", "Reque", "Santa Rosa", "Saña", "Cayaltí", "Patapo", "Pomalca", "Pucalá", "Tumán"]
-            },
-            "Junín": {
-                "Huancayo": ["Huancayo", "Carhuacallanga", "Chacapampa", "Chicche", "Chilca", "Chongos Alto", "Chupuro", "Colca", "Cullhuas", "El Tambo", "Huacrapuquio", "Hualhuas", "Huancan", "Huasicancha", "Huayucachi", "Ingenio", "Pariahuanca", "Pilcomayo", "Pucara", "Quichuay", "Quilcas", "San Agustín", "San Jerónimo", "San Pedro", "Santo Domingo", "Sapallanga", "Sicaya", "Viques"]
-            },
-            "Puno": {
-                "Puno": ["Puno", "Acora", "Amantani", "Atuncolla", "Capachica", "Chucuito", "Coata", "Huata", "Mañazo", "Paucarcolla", "Pichacani", "Plateria", "San Antonio", "Tiquillaca", "Vilque"]
+            "Amazonas": {
+                "Chachapoyas": ["Asunción", "Balsas", "Chachapoyas", "Cheto", "Chiliquin", "Chuquibamba", "Granada", "Huancas", "La Jalca", "Leimebamba", "Levanto", "Magdalena", "Mariscal Castilla", "Molinopampa", "Montevideo", "Olleros", "Quinjalca", "San Francisco de Daguas", "San Isidro de Maino", "Soloco", "Sonche"],
+                "Bagua": ["Aramango", "Bagua", "Copallin", "El Parco", "Imaza", "La Peca"],
+                "Bongará": ["Cajaruro", "Cumba", "El Milagro", "Jazan", "Jeep", "Lamud", "Pitu", "Yambrasbamba"],
+                "Condorcanqui": ["El Cenepa", "Nieva", "Río Santiago"],
+                "Luya": ["Camporredondo", "Cocabamba", "Kosñipata", "Lamud", "Longuita", "Lonya Chico", "Luya", "Luya Viejo", "Maria", "Ocalli", "Ocumal", "Pisqui", "Providencia", "San Cristóbal", "San Francisco del Yeso", "San Jerónimo", "San Juan de Lopecancha", "Santa Catalina", "Santo Tomas", "Tingo"],
+                "Rodríguez de Mendoza": ["Chirimoto", "Cochamal", "Huambo", "Luya Viejo", "María", "Mendoza", "Milpuc", "Omia", "San Nicolás", "Santa Rosa", "Totora", "Vista Alegre"],
+                "Utcubamba": ["Andabamba", "Cajaruro", "Cumba", "El Milagro", "Jazan", "Jeep", "Lamud", "Pitu", "Yambrasbamba"]
             },
             "Ancash": {
-                "Huaraz": ["Huaraz", "Cochabamba", "Colcabamba", "Huanchay", "Independencia", "Jangas", "La Libertad", "Olleros", "Pampas", "Pariacoto", "Pira", "Tarica"]
+                "Huaraz": ["Cochabamba", "Colcabamba", "Huanchay", "Independencia", "Jangas", "La Libertad", "Olleros", "Pampas", "Pariacoto", "Pira", "Tarica", "Huaraz"],
+                "Aija": ["Aija", "Coris", "Huacllan", "La Merced", "Succha"],
+                "Antonio Raymondi": ["Aczo", "Cajacay", "Chaman", "Cochas", "Huayllacayan", "Huayrasbamba", "Lacabamba", "Llapo", "Pallasca", "Pampas", "Santa Rosa", "Tauca"],
+                "Asunción": ["Chacas", "Acochaca"],
+                "Bolognesi": ["Abelardo Pardo Lezameta", "Antonio Raymondi", "Aquia", "Cajamarca", "Cajatambo", "Carhuaz", "Casma", "Corongo", "Huari", "Huarmey", "Huaylas", "Mariscal Luzuriaga", "Oyon", "Pallasca", "Pomabamba", "Recuay", "Santa", "Sihuas", "Yungay"],
+                "Carhuaz": ["Acopampa", "Amashca", "Anta", "Ataquero", "Carhuaz", "Huallanca", "Huata", "Huayllabamba", "Mashcon", "Pariacoto", "San Miguel de Aco", "Tinco", "Yura"],
+                "Carlos Fermín Fitzcarrald": ["Aczo", "Cajacay", "Huacllan", "La Merced", "Succha"],
+                "Casma": ["Buena Vista Alta", "Casma", "Comandante Noel", "Yautan"],
+                "Corongo": ["Aco", "Bambas", "Corongo", "Huayllas", "Matacoto", "Pamapampa", "San Juan de Yscos", "San Marcos", "Santa Rosa", "Tauca"],
+                "Huari": ["Anra", "Cajay", "Chavin de Huantar", "Huacachi", "Huacchis", "Huachis", "Huantar", "Masin", "Paucas", "Ponto", "Rahuapampa", "Rapayan", "San Marcos", "San Pedro de Chana", "Uco"],
+                "Huarmey": ["Cochapeti", "Huarmey", "Huayan", "Malvas", "Culebras"],
+                "Huaylas": ["Caraz", "Huallanca", "Huata", "Huaylas", "Mato", "Pamparomas", "Pueblo Libre", "Santa Cruz", "Santo Toribio", "Yuracmarca"],
+                "Mariscal Luzuriaga": ["Catac", "Cotapunco", "Haquira", "Huayllan", "Las Juntas", "Tintay", "Tambobamba", "Pampamarca", "Fiori", "Conchucos", "San Antonio", "Cusca", "Aquija", "Sorquis", "Pitumarca", "San Marcos"],
+                "Oyon": ["Cochas", "Chacayan", "Conchucos", "Huacaschuque", "Matacoto", "Oyon", "Pacllon"],
+                "Pallasca": ["Baccha", "Chiquian", "Huaraz", "Pariahuanca", "San Miguel de Corpanqui", "Ticllos", "Yanama", "Cascapara", "Mancos", "Parian", "Pashap", "Pecos", "San Pablo", "Tinco", "Yuracmarca"],
+                "Pomabamba": ["Huayllan", "Pomabamba", "Quinuabamba", "Pirias"],
+                "Recuay": ["Cajanos", "Cusca", "Huayllapampa", "Mashcon", "Pampas Chico", "Pararinn", "Recuay", "Tapacocha", "Ticapampa"],
+                "Santa": ["Callejón de Huaylas", "Huata", "Nepeña", "Paccho", "San Miguel", "Siquisqui", "Yungay", "Coishco", "Chimbote", "Nuevo Chimbote", "Independencia", "Samanco", "Santa"],
+                "Sihuas": ["Acobamba", "Alfonso Ugarte", "Cashapampa", "Chingalpo", "Huayllabamba", "Quiches", "Ragash", "San Juan", "Sicsibamba", "Acari", "Cotahuasi", "Chuquibamba", "Orcotuna", "Pampamarca", "Puyca", "Salamanca", "Saya", "Tauria", "Tomepampa", "Toro"],
+                "Yungay": ["Cascapara", "Mancos", "Pararinn", "Pira", "Ranrahirca", "Shupluy", "Yanama", "Yungay"]
+            },
+            "Apurímac": {
+                "Abancay": ["Abancay", "Chacoche", "Circa", "Curahuasi", "Huanipaca", "Lambrama", "Pichirhua", "San Pedro de Cachora", "Tamburco"],
+                "Andahuaylas": ["Andahuaylas", "Andarapa", "Chalhuanca", "Chapimarca", "Cotaruse", "Huancarama", "Huancaray", "Huayana", "José María Arguedas", "Kishuara", "Pacobamba", "Pacucha", "Pampachiri", "Pomacocha", "San Antonio de Cachi", "San Jerónimo", "San Miguel de Chaccrampa", "Santa María de Chicmo", "Talavera", "Tumay Huaraca", "Turpo", "Kaquiabamba"],
+                "Antabamba": ["Antabamba", "El Oro", "Huaquirca", "Juan Espinoza Medrano", "Oropesa", "Pachaconas", "Sabaino"],
+                "Aymaraes": ["Capaya", "Caraybamba", "Chalhuanca", "Chapimarca", "Colcabamba", "Cotaruse", "Huancarama", "Huancaray", "Huayana", "José María Arguedas", "Kishuara", "Pacobamba", "Pacucha", "Pampachiri", "Pomacocha", "San Antonio de Cachi", "San Jerónimo", "San Miguel de Chaccrampa", "Santa María de Chicmo", "Talavera", "Tumay Huaraca", "Turpo", "Kaquiabamba"],
+                "Cotabambas": ["Andarapa", "Chalhuanca", "Chapimarca", "Cotaruse", "Huancarama", "Huancaray", "Huayana", "José María Arguedas", "Kishuara", "Pacobamba", "Pacucha", "Pampachiri", "Pomacocha", "San Antonio de Cachi", "San Jerónimo", "San Miguel de Chaccrampa", "Santa María de Chicmo", "Talavera", "Tumay Huaraca", "Turpo", "Kaquiabamba"],
+                "Chincheros": ["Chincheros", "Anco Huallo", "Cocharcas", "El Porvenir", "Inca Urco", "Los Chankas", "Ocobamba", "Pucara", "San Juan de Iscos", "San Juan de Chacña", "Tinco", "Uranmarca"],
+                "Grau": ["Chuquibambilla", "Curasco", "Gamarra", "Huayllati", "Micaela Bastidas", "Pataypampa", "Progreso", "San Antonio", "Santa Rosa", "Turpay", "Vilcabamba", "Virundo", "Curahuasi", "Huayllas", "Ticaco"]
+            },
+            "Arequipa": {
+                "Arequipa": ["Arequipa", "Alto Selva Alegre", "Cayma", "Cerro Colorado", "Characato", "Chiguata", "Jacobo Hunter", "La Joya", "Mariano Melgar", "Miraflores", "Mollebaya", "Paucarpata", "Pocsi", "Polobaya", "Quequeña", "Sabandia", "Sachaca", "San Juan de Siguas", "San Juan de Tarucani", "Santa Isabel de Siguas", "Santa Rita de Siguas", "Socabaya", "Tiabaya", "Uchumayo", "Vitor", "Yanahuara", "Yarabamba", "Yura", "José Luis Bustamante y Rivero"],
+                "Camaná": ["Camaná", "José María Quimper", "Mariano Nicolás Valcárcel", "Nicolás de Pierola", "Ocoña", "Quilca", "Samuel Pastor"],
+                "Caravelí": ["Caravelí", "Acarí", "Atico", "Atiquipa", "Bella Unión", "Cahuacho", "Chala", "Chaparra", "Huanuhuanu", "Jaqui", "Lomas", "Quicacha", "Yauca del Rosario"],
+                "Castilla": ["Aplao", "Andagua", "Ayo", "Chachas", "Chilcaymarca", "Choco", "Huancarqui", "Machaguay", "Orcopampa", "Pampacolca", "Tipan", "Uñon", "Uraca", "Viraco", "Yanaquihua"],
+                "Caylloma": ["Tuti", "Abercon", "Chivay", "Caylloma", "Coporaque", "Huambo", "Huanca", "Lari", "Lluta", "Maca", "Madrigal", "San Antonio de Chuca", "Sibayo", "Tapay", "Tisco", "Tuti", "Yanque", "Majes"],
+                "Condesuyos": ["Chuquibamba", "Andaray", "Cayarani", "Chichas", "Iray", "Río Grande", "Salamanca", "Yanaquihua"],
+                "Islay": ["Mollendo", "Cocachacra", "Dean Valdivia", "Islay", "Mejía", "Punta de Bombón"],
+                "La Unión": ["Cotahuasi", "Alca", "Charcana", "Huaynacotas", "Pampamarca", "Puyca", "Salamanca", "Saya", "Tauria", "Tomepampa", "Toro"]
+            },
+            "Ayacucho": {
+                "Huamanga": ["Ayacucho", "Acocro", "Acos Vinchos", "Carmen Alto", "Chiara", "Ocros", "Pacaycasa", "Quinua", "San José de Ticllas", "San Juan Bautista", "Santiago de Pischa", "Socos", "Tambillo", "Vinchos", "Jesús Nazareno"],
+                "Cangallo": ["Cangallo", "Chuschi", "Los Morochos", "María Parado de Bellido", "Paras", "Totoropampa"],
+                "Huanca Sancos": ["Huanca Sancos", "Carapo", "Sacsamarca", "Santiago de Lucanamarca"],
+                "Huanta": ["Huanta", "Ayahuanco", "Huamanguilla", "Iguain", "Luricocha", "Santillana", "Sivia", "Llochegua", "Canayre", "Uchuraccay", "Pucacolpa", "Chaca"],
+                "La Mar": ["San Miguel", "Anco", "Ayna", "Chilcas", "Chungui", "Luis Carranza", "Santa Rosa", "Tambo"],
+                "Lucanas": ["Puquio", "Aucara", "Cabana", "Carmen Salcedo", "Chaviña", "Chipao", "Huac-Huas", "Laramarca", "Leoncio Prado", "Llauta", "Lucanas", "Ocaña", "Otoca", "Saisa", "San Cristóbal", "San Juan", "San Pedro", "San Pedro de Palco", "Sancos", "Santa Ana de Huayca", "Santa Lucia", "Tibillo"],
+                "Parinacochas": ["Coracora", "Chumpi", "Coronel Castañeda", "Pacapausa", "Pullo", "Puyusca", "San Francisco de Ravacayco", "Upahuacho"],
+                "Páucar del Sara Sara": ["Pausa", "Colta", "Corculla", "Lampa", "Marcabamba", "Oyolo", "Pararca", "San J. de Salinas", "Sara Sara", "Buenos Aires", "Carapo", "Pitca", "Sacsamarca", "Tinco"],
+                "Sucre": ["Querobamba", "Belén", "Chalcos", "Chilcayoc", "Huacaña", "Morcolla", "Paico", "San Pedro de Larcay", "San Salvador de Quije", "Santiago de Paucaray", "Soras"],
+                "Víctor Fajardo": ["Huancapi", "Alcamenca", "Apongo", "Asquipata", "Canaria", "Cayara", "Colca", "Huamanquiquia", "Huancapi", "Huancaray", "Huayacundo Arma", "Sarhua", "Vilcanchos"],
+                "Vilcas Huamán": ["Vilcashuamán", "Accomarca", "Carhuanca", "Concepción", "Huambalpa", "Independencia", "Saurama", "Vischongo"]
+            },
+            "Cajamarca": {
+                "Cajamarca": ["Cajamarca", "Asunción", "Chetilla", "Cospan", "Encañada", "Jesús", "Llacanora", "Los Baños del Inca", "Magdalena", "Matara", "Namora", "San Juan"],
+                "Cajabamba": ["Cajabamba", "Cachachi", "Condebamba", "Sitacocha"],
+                "Celendín": ["Celendín", "Chumuch", "Cortegana", "Huasmin", "Jorge Chávez", "José Gálvez", "Miguel Iglesias", "Oxamarca", "Pío IX", "Sonia", "Sucre", "Utco", "La Libertad de Pallan"],
+                "Chota": ["Chota", "Anguia", "Chadin", "Chalamarca", "Chiguirip", "Chimban", "Choropampa", "Cochabamba", "Huambos", "Lajas", "Llama", "Miracosta", "Paccha", "Pion", "Querocoto", "San Juan de Licupis", "Tacabamba", "Tocmoche", "Chalcos", "Chupan", "Huambos", "Pomabamba", "San Lucas", "Tocmoche", "Choropampa", "Cachachi"],
+                "Contumazá": ["Contumazá", "Chilete", "Cupisnique", "Guzmango", "San Benito", "Santa Cruz de Toledo", "Tantarica", "Yonan"],
+                "Cutervo": ["Cutervo", "Callayuc", "Choros", "Cujillo", "La Ramada", "Pimpingos", "Querocotillo", "San Andrés de Cutervo", "San Juan de Cutervo", "San Luis de Lucma", "Santa Cruz", "Santo Domingo de la Capilla", "Santo Tomas", "Socota", "Toribio Casanova"],
+                "Hualgayoc": ["Bambamarca", "Chugur", "Hualgayoc"],
+                "Jaén": ["Jaén", "Bellavista", "Chontaguí", "Colasay", "Huabal", "Las Pirias", "Pomahuaca", "Pucara", "Sallique", "San Felipe", "San José del Alto", "Santa Rosa"],
+                "San Ignacio": ["San Ignacio", "Chirinos", "Huarango", "La Coipa", "Namballe", "San José de Lourdes", "Tabaconas"],
+                "San Marcos": ["San Marcos", "San Nicolás", "San Pedro de Cutud", "Santa Rosa", "Urpay"],
+                "San Miguel": ["San Miguel", "Bolívar", "Calquis", "Catilluc", "El Prado", "La Florida", "Llapa", "Nanchoc", "Niepos", "San Gregorio", "San Silvestre de Cochan", "Tongod", "Unión Agua Blanca"],
+                "San Pablo": ["San Pablo", "San Bernardino", "San Lorenzo", "Tumbaden"],
+                "Santa Cruz": ["Santa Cruz", "Andabamba", "Catache", "Chancay", "La Esperanza", "Ninabamba", "Pulan", "Saucepampa", "Sexi", "Uticyacu", "Yauyucan"]
+            },
+            "Callao": {
+                "Callao": ["Callao", "Bellavista", "Carmen de la Legua Reynoso", "La Perla", "La Punta", "Ventanilla", "Mi Perú"]
+            },
+            "Cusco": {
+                "Cusco": ["Cusco", "Ccorca", "Poroy", "San Jerónimo", "San Sebastian", "Santiago", "Saylla", "Wanchaq"],
+                "Acomayo": ["Acomayo", "Acopia", "Acos", "Armadeño", "Ccarhuayo", "Cusillu", "Omacha", "San Juan de Pucara", "Tamburco", "Tintay Puncu"],
+                "Anta": ["Anta", "Ancahuasi", "Cachimayo", "Chinchaypujio", "Huarocondo", "Limatambo", "Mollemarca", "Pucyura", "Zurite"],
+                "Calca": ["Calca", "Coya", "Lamay", "Lares", "Pisac", "San Salvador", "Sanco", "Tintay Puncu"],
+                "Canas": ["Sicuani", "Checca", "Combapata", "Kunturkanki", "Langui", "Layo", "Pacobamba", "Pucara", "Santiago", "Vilcabamba", "Quñota", "Andagua", "Santa Ana", "Maranura", "Jairi", "Pomacanchi", "Tupac Amaru"],
+                "Canchis": ["Sicuani", "Checca", "Combapata", "Kunturkanki", "Langui", "Layo", "Pacobamba", "Pucara", "Santiago", "Vilcabamba", "Quñota", "Andagua", "Santa Ana", "Maranura", "Jairi", "Pomacanchi", "Tupac Amaru"],
+                "Chumbivilcas": ["Sangarara", "Cachiyacu", "Mollepampa", "Pitumarca", "San Pedro", "Uyuni", "Llusco", "Chumbivilcas", "Cosñipata"],
+                "Espinar": ["Espinar", "Condoroma", "Coporaque", "Ocoruro", "Pallpata", "Pichigua", "Suyckutambo", "Alto Pichigua"],
+                "La Convención": ["Santo Tomás", "Ccarhuayco", "Colquemarca", "Huayopata", "Inkawasi", "Kosñipata", "Machupicchu", "Maranura", "Ocobamba", "Quellouno", "Queno", "Sorayacocha", "Urubamba"],
+                "Paruro": ["Paruro", "Accha", "Ccapi", "Colcha", "Huanoquite", "Omacha", "Paccaritambo", "Pillpinto", "Yaurisque"],
+                "Paucartambo": ["Puerto Inca", "Cunchabu", "Huacar", "Laramarca", "San Salvador", "Tambo", "Tournavista", "Yuracyacu"],
+                "Quispicanchi": ["Urcos", "Andahuaylillas", "Camanti", "Ccanche", "Cusipata", "Huaro", "Lucre", "Marcapata", "Ocongate", "Oropesa", "Quiquijana"],
+                "Urubamba": ["Urubamba", "Chinchero", "Huayllabamba", "Machupicchu", "Ollantaytambo", "Pisac", "Pumamarca", "Zurite"]
+            },
+            "Huancavelica": {
+                "Huancavelica": ["Huancavelica", "Acobambilla", "Acoria", "Conayca", "Cuenca", "Huachocolpa", "Huayllahuanca", "Izcuchaca", "Laria", "Manta", "Mariscal Cáceres", "Moya", "Nuevo Occoro", "Pilchaca", "Vilca", "Yauli", "Ascensión", "Huando", "Huantar", "Huayllay Grande", "San José de Chupamarca", "San Juan de Yscos", "San Miguel de Mayocc", "Santiago de Chocorvos", "Santo Domingo de Acobamba", "Sauquillo de Ccaco", "Soracca", "Tintay Puncu", "Yauca"],
+                "Acobamba": ["Acobamba", "Andabamba", "Chaquicocha", "Huanca Huanca", "Llautos", "Pomacocha", "Rosario"],
+                "Angaraes": ["Lircay", "Anchonga", "Callanmarca", "Ccochaccasa", "Chincho", "Congalla", "Huanca", "Huayllay Grande", "Julcamarca", "San Antonio de Antaparco", "Santo Tomas de Pata", "Secclla"],
+                "Castrovirreyna": ["Castrovirreyna", "Arma", "Aurahua", "Capillas", "Chupamarca", "Cocas", "Huachos", "Huamatambo", "Mollepampa", "San Juan", "Santa Ana", "Tantara", "Ticrapo"],
+                "Churcampa": ["Churcampa", "Anco", "Chinchihuasi", "El Carmen", "La Merced", "Locroja", "Pachamarca", "Pueblo Nuevo", "San Miguel de Mayocc", "San Pedro de Coris", "Pacapausa", "Cosme", "Santiago de Chocorvos", "Santo Domingo de Acobamba", "Sauquillo de Ccaco", "Soracca", "Tintay Puncu", "Yauca"],
+                "Huaytará": ["Huaytará", "Ayavi", "Córdova", "Huayacundo Arma", "Laramarca", "Mollecocha", "Pueblo Nuevo", "Querco", "Quito-Arma", "San Antonio de Cusicancha", "San Francisco de Sangayaico", "San Isidro", "Santiago de Chocorvos", "Santo Domingo de Capillas", "Saya", "Soracca"],
+                "Tayacaja": ["Pampas", "Acostambo", "Acraquia", "Ahuaycha", "Colcabamba", "Daniel Hernández", "Huachocolpa", "Huantar", "Huaribamba", "Ñahuimpuquio", "Pazos", "Quishuar", "Salcabamba", "Salcabamba", "San Marcos de Rocchac", "Santa Ana de Tusi", "Santiago de Tucuma", "Santo Domingo", "Taraq", "Yauca del Rosario"]
+            },
+            "Huánuco": {
+                "Huánuco": ["Huánuco", "Amarilis", "Chinchao", "Churubamba", "Margos", "Quisqui", "San Francisco de Cayran", "San Pedro de Chaulan", "Santa María del Valle", "Yarumayo", "Pillco Marca", "Yacus", "San Pablo de Pillao"],
+                "Ambo": ["Ambo", "Cayna", "Colpas", "Conchamarca", "Huacar", "San Francisco", "San Rafael", "Tomay Kinti"],
+                "Dos de Mayo": ["La Unión", "Chuquis", "Marias", "Pachas", "Quivilla", "Ripan", "Shunqui", "Sillapata", "Yanas"],
+                "Huacaybamba": ["Huacaybamba", "Canchabamba", "Punchao", "Puncu", "San Miguel", "Santa Rosa", "Yorongos", "Yacus"],
+                "Huamalíes": ["Llata", "Arancay", "Chavín de Pariarca", "Gonchán", "Huacllan", "Monzón", "Punchao", "Puños", "Singa", "Tantamayo"],
+                "Leoncio Prado": ["Rupa-Rupa", "Daniel Alomía Robles", "Hermílio Valdizan", "José Crespo y Castillo", "Luyando", "Mariano Damaso Beraun", "Pucayacu", "Castillo Grande", "Pueblo Nuevo", "Santo Domingo de Anda"],
+                "Marañón": ["Huacrachuco", "Cholon", "San Buenaventura"],
+                "Pachitea": ["Panao", "Chaglla", "Molino", "Umari"],
+                "Puerto Inca": ["Puerto Inca", "Codo del Pozuzo", "Honoria", "Tournavista", "Yuyapichis"],
+                "Lauricocha": ["Jesús", "Baños", "Jivia", "Queropalca", "Rondos", "San Francisco de Asís", "San Miguel de Cauri"],
+                "Yarowilca": ["Chavinillo", "Cahuac", "Chacabamba", "Aparicio Pomares", "Jacas Grande", "Obas", "Pampamarca", "Santa Barbara de Carhuaz", "Huachos", "Pueblo Nuevo de Pillao", "San Miguel de Mayocc", "Santa Rosa de Alto Yanajanca"]
             },
             "Ica": {
-                "Ica": ["Ica", "La Tinguiña", "Los Aquijes", "Ocucaje", "Pachacutec", "Parcona", "Pueblo Nuevo", "Salas", "San José", "San Juan Bautista", "Santiago", "Subtanjalla", "Tate", "Yauca"]
+                "Ica": ["Ica", "La Tinguiña", "Los Aquijes", "Ocucaje", "Pachacutec", "Parcona", "Pueblo Nuevo", "Salas", "San José de Los Molinos", "San Juan Bautista", "Santiago", "Subtanjalla", "Tate", "Yauca del Rosario"],
+                "Chincha": ["Chincha Alta", "Alto Laran", "Chavin", "Chincha Baja", "El Carmen", "Grocio Prado", "Pueblo Nuevo", "San Juan de Yanacancha", "San Pedro de Huacarpana"],
+                "Nazca": ["Nazca", "Changuillo", "El Ingenio", "Marcona", "Vista Alegre"],
+                "Palpa": ["Palpa", "Llipata", "Río Grande", "Santa Cruz", "Tibillo"],
+                "Pisco": ["Pisco", "Huancano", "Humay", "Independencia", "Paracas", "San Andrés", "San Clemente", "Tupac Amaru Inca"]
+            },
+            "Junín": {
+                "Huancayo": ["Huancayo", "Carhuacallanga", "Chacapampa", "Chicche", "Chilca", "Chongos Alto", "Chupuro", "Colca", "Cullhuas", "El Tambo", "Huacrapuquio", "Hualhuas", "Huancan", "Huasicancha", "Huayucachi", "Ingenio", "Pariahuanca", "Pilcomayo", "Pucara", "Quichuay", "Quilcas", "San Agustín", "San Jerónimo", "San Juan de Iscos", "San Juan de Jarpa", "San Miguel de Acos", "San Pedro de Chunan", "Santo Domingo de Acobamba", "Sapallanga", "Sicaya", "Viques"],
+                "Chanchamayo": ["La Merced", "Chanchamayo", "El Mantaro", "Perene", "Pichanaqui", "San Luis de Shuaro", "San Ramón", "Vitoc"],
+                "Chupaca": ["Chupaca", "Ahuac", "Chongos Bajo", "Huachac", "Huamancaca Chico", "San Juan de Iscos", "San Juan de Jarpa", "Tres de Diciembre", "Yanacancha"],
+                "Concepción": ["Concepción", "Aco", "Andamarca", "Chambara", "Cochas", "Comas", "Heroínas Toledo", "Manzanares", "Marías", "Matahuanca", "Mito", "Nueve de Julio", "Orcotuna", "San José de Quero", "Santa Rosa de Ocopa", "Santo Domingo de Acobamba", "Yanacancha"],
+                "Huancavelica": ["Huancavelica", "Acobambilla", "Acoria", "Conayca", "Cuenca", "Huachocolpa", "Huayllay Grande", "Izcuchaca", "Laria", "Manta", "Mariscal Cáceres", "Moya", "Nuevo Occoro", "Pilchaca", "Vilca", "Yauli", "Ascensión", "Huando", "Huantar", "Huayllay Grande", "San José de Chupamarca", "San Juan de Yscos", "San Miguel de Mayocc", "Santiago de Chocorvos", "Santo Domingo de Acobamba", "Sauquillo de Ccaco", "Soracca", "Tintay Puncu", "Yauca"],
+                "Jauja": ["Jauja", "Acolla", "Canchacallanga", "El Mantaro", "Huamali", "Huaquirca", "Huertas", "Janjaillo", "Julcán", "Leonor Ordóñez", "Llocllapampa", "Marco", "Masma", "Masma Chicche", "Matucana", "Molinos", "Monobamba", "Muqui", "Muquiyauyo", "Paca", "Paccha", "Pancan", "Parco", "Pomacancha", "Pucara", "Quichuas", "Quilcas", "Rondos", "San Lorenzo", "San Pedro de Chunan", "Sausa", "Sincos", "Tunan Marca", "Yauli", "Yauyos"],
+                "Junín": ["Junín", "Carhuamayo", "Ondores", "Ulcumayo"],
+                "Satipo": ["Satipo", "Coviriali", "Llaylla", "Mazamari", "Pampa Hermosa", "Pangoa", "Río Negro", "Río Tambo", "Vizcatan del Ene"],
+                "Tarma": ["Tarma", "Acobamba", "Huaricolca", "Huasahuasi", "La Unión", "Palca", "Palcas", "San Pedro de Cajas", "Tapo"],
+                "Yauli": ["Yauli", "Chacapalpa", "Huay-Huay", "Junín", "Moro Collo", "Paccha", "Pancana", "Santa Rosa", "Sapallanga", "Sicaya", "Viques"]
+            },
+            "La Libertad": {
+                "Trujillo": ["Trujillo", "El Porvenir", "Florencia de Mora", "Huanchaco", "La Esperanza", "Laredo", "Moche", "Poroto", "Salaverry", "Simbal", "Victor Larco"],
+                "Ascope": ["Ascope", "Casa Grande", "Chicama", "Chocope", "Magdalena de Cao", "Paijan", "Rázuri", "Santiago de Cao", "Casa Grande"],
+                "Bolívar": ["Bolívar", "Calquis", "Cascas", "Condirco", "Longorza", "Uchumarca", "Ucuncha"],
+                "Chepén": ["Chepén", "Pueblo Nuevo", "San José"],
+                "Julcán": ["Julcán", "Calquis", "Carabamba", "Huaso", "Paccha", "Querococh", "San Miguel de Corpanqui", "Totos"],
+                "Otuzco": ["Otuzco", "Agallpampa", "Charat", "Huaranchal", "La Cuesta", "Mache", "Paranday", "Salpo", "Sinsicap", "Usquil"],
+                "Pacasmayo": ["San Pedro de Lloc", "Guadalupe", "Jequetepeque", "Pacasmayo", "San José"],
+                "Pataz": ["Tayabamba", "Buldibuyo", "Chillia", "Huancaspata", "Huaylillas", "Huayo", "Ongon", "Parcoy", "Pataz", "Pias", "Santiago de Challas", "Taurija", "Urpay"],
+                "Sánchez Carrión": ["Huamachuco", "Chugay", "Cochorco", "Curgos", "Marcabal", "Sanagoran", "Sarin", "Sartimbamba"],
+                "Santiago de Chuco": ["Santiago de Chuco", "Angasmarca", "Cachicadan", "Mollebamba", "Mollepata", "Quiruvilca", "Santa Cruz de Chuco", "Sitabamba"],
+                "Gran Chimú": ["Cascas", "Lucma", "Marmot", "Sayapullo"],
+                "Virú": ["Virú", "Chao", "Guadalupito"]
+            },
+            "Lambayeque": {
+                "Chiclayo": ["Chiclayo", "Chongoyape", "Eten", "Eten Puerto", "José Leonardo Ortiz", "La Victoria", "Lagunas", "Monsefú", "Nueva Arica", "Oyotún", "Picsi", "Pimentel", "Reque", "Santa Rosa", "Saña", "Cayaltí", "Patapo", "Pomalca", "Pucalá", "Tumán"],
+                "Ferreñafe": ["Ferreñafe", "Cañaris", "Incahuasi", "Manuel Antonio Mesones Muro", "Pitipo", "Pueblo Nuevo"],
+                "Lambayeque": ["Lambayeque", "Chochope", "Illimo", "Jayanca", "Mochumí", "Morrope", "Motupe", "Olmos", "Pacora", "Salas", "San José", "Tucume"]
+            },
+            "Lima": {
+                "Lima": ["Lima", "Ancón", "Ate", "Barranco", "Breña", "Carabayllo", "Chaclacayo", "Chorrillos", "Cieneguilla", "Comas", "El Agustino", "Independencia", "Jesús María", "La Molina", "La Victoria", "Lince", "Los Olivos", "Lurigancho", "Lurín", "Magdalena del Mar", "Miraflores", "Pachacamac", "Pucusana", "Pueblo Libre", "Puente Piedra", "Punta Hermosa", "Punta Negra", "Rímac", "San Bartolo", "San Borja", "San Isidro", "San Juan de Lurigancho", "San Juan de Miraflores", "San Luis", "San Martín de Porres", "San Miguel", "Santa Anita", "Santa María del Mar", "Santa Rosa", "Santiago de Surco", "Surquillo", "Villa El Salvador", "Villa María del Triunfo"],
+                "Barranca": ["Barranca", "Paramonga", "Pativilca", "Supe", "Supe Puerto"],
+                "Cajatambo": ["Cajatambo", "Copa", "Gorgor", "Huancapon", "Manas"],
+                "Canta": ["Canta", "Arahuay", "Huamantanga", "Huaros", "Lachaqui", "San Buenaventura", "Santa Rosa de Quives"],
+                "Cañete": ["San Vicente de Cañete", "Asia", "Calango", "Cerro Azul", "Chilca", "Coayllo", "Imperial", "Lunahuana", "Mala", "Nuevo Imperial", "Pacaran", "Quilmana", "San Antonio", "San Luis", "Santa Cruz", "Zúñiga"],
+                "Huaral": ["Huaral", "Atavillos Alto", "Atavillos Bajo", "Aucallama", "Chancay", "Ihuari", "Lampian", "Pacaraos", "San Miguel de Acos", "Santa Cruz de Andamarca", "Sumbilca", "Veintisiete de Noviembre"],
+                "Huarochirí": ["Matucana", "Antioquia", "Callahuanca", "Carampoma", "Chicla", "Cuenca", "Huachupampa", "Huanza", "Huarochirí", "Lahuaytambo", "Langa", "Laraos", "Mariatana", "Ricardo Palma", "San Andrés de Tupicocha", "San Antonio", "San Bartolomé", "San Damian", "San Juan de Iris", "San Juan de Tantaranche", "San Lorenzo de Quinti", "San Mateo", "San Mateo de Otao", "San Pedro de Casta", "San Pedro de Huancayre", "Sangallaya", "Santa Cruz de Flores", "Santa Eulalia", "Santiago de Anchucaya", "Santiago de Tuna", "Santo Domingo de Los Olleros", "Surco"],
+                "Huaura": ["Huacho", "Ambar", "Caleta de Carquín", "Checras", "Hualmay", "Huaura", "Leoncio Prado", "Paccho", "Santa Leonor", "Santa María", "Sayan", "Vegueta"],
+                "Oyón": ["Oyón", "Andajes", "Caujul", "Cochamarca", "Navan", "Pachangara"],
+                "Yauyos": ["Yauyos", "Alis", "Allauca", "Ayaviri", "Azángaro", "Cacra", "Carania", "Catahuasi", "Chocos", "Cochas", "Colonia", "Hongos", "Huampara", "Huancaya", "Huangascar", "Huantan", "Huañec", "Laraos", "Lincha", "Madean", "Miraflores", "Omas", "Putinza", "Quinches", "Quinocay", "San Joaquín", "San Pedro de Pilas", "Tanta", "Tauripampa", "Tomas", "Tupe", "Viñac", "Vitis"]
+            },
+            "Loreto": {
+                "Maynas": ["Iquitos", "Alto Nanay", "Florencia de Mora", "Indiana", "Las Amazonas", "Mazan", "Napo", "Punchana", "Torres Causana", "San Juan Bautista"],
+                "Alto Amazonas": ["Yurimaguas", "Balsapuerto", "Jeberos", "Lagunas", "Santa Cruz", "Teniente Cesar López Rojas"],
+                "Loreto": ["Nauta", "Parinari", "Tigre", "Trompeteros", "Urarinas"],
+                "Mariscal Ramón Castilla": ["Caballococha", "Pebas", "Yavari", "San Pablo"],
+                "Requena": ["Requena", "Alto Tapiche", "Capelo", "Emilio San Martín", "Maquia", "Puinahua", "Saquena", "Soplin", "Tapiche", "Jenaro Herrera", "Yaquerana"],
+                "Ucayali": ["Contamana", "Inahuaya", "Padre Márquez", "Pampa Hermosa", "Sarayacu", "Vargas Guerra"],
+                "Datem del Marañón": ["Lagunas", "Santa Bárbara", "Herme", "Teniente Cesar López Rojas", "Barcelona", "Cahuapanas", "Manseriche", "Morona", "Pastaza", "Andoas"],
+                "Putumayo": ["Putumayo", "Rosa Panduro", "Teniente Manuel Clavero", "Yagasyacu"]
+            },
+            "Madre de Dios": {
+                "Tambopata": ["Tambopata", "Inambari", "Las Piedras", "Laberinto"],
+                "Manu": ["Manu", "Fitzcarrald", "Madre de Dios", "Huepetuhe"],
+                "Tahuamanu": ["Iñapari", "Iberia", "Tahuamanu"]
+            },
+            "Moquegua": {
+                "Mariscal Nieto": ["Moquegua", "Carumas", "Cuchumbaya", "Samegua", "San Cristóbal", "Torata"],
+                "General Sánchez Cerro": ["Omate", "Chojata", "Coalaque", "Ichuña", "La Capilla", "Lloque", "Matalaque", "Puquina", "Quinistaquillas", "Ubinas", "Yunga"],
+                "Ilo": ["Ilo", "El Algarrobal", "Pacocha"]
+            },
+            "Pasco": {
+                "Pasco": ["Chaupimarca", "Huachon", "Huariaca", "Huayllay", "Ninacaca", "Pallanchacra", "Paucartambo", "San Francisco de Asís de Yarusyacán", "Simon Bolívar", "Ticlacayan", "Tinyahuarco", "Vicco", "Yanacancha"],
+                "Daniel Alcides Carrión": ["Yanahuanca", "Chacayan", "Goyllarisquizga", "Paucar", "San Francisco de Asís de Yarusyacán", "Simon Bolívar", "Ticlacayan", "Tinyahuarco", "Vicco", "Yanacancha"],
+                "Oxapampa": ["Oxapampa", "Chontabamba", "Huancabamba", "Palcazu", "Pozuzo", "Puerto Bermúdez", "Villa Rica", "Constitución"],
+                "Yanahuanca": ["Yanahuanca", "Chacayan", "Goyllarisquizga", "Paucar", "San Francisco de Asís de Yarusyacán", "Simon Bolívar", "Ticlacayan", "Tinyahuarco", "Vicco", "Yanacancha"],
+                "Grau": ["Chacayan", "Goyllarisquizga", "Huayllay Grande", "Pacaycasa", "Pucacaca", "Sallacc", "San Francisco de Asís de Yarusyacán", "Santa Ana", "Ticlacayan", "Vicco", "Yanacancha"]
+            },
+            "Piura": {
+                "Piura": ["Piura", "Castilla", "Catacaos", "Cura Mori", "El Tallan", "La Arena", "La Unión", "Las Lomas", "Tambo Grande", "Veintiseis de Octubre"],
+                "Ayabaca": ["Ayabaca", "Frum", "Jilili", "Lagunas", "Montero", "Pacaipampa", "Paimas", "Sapillica", "Sicchez", "Suyo"],
+                "Huancabamba": ["Huancabamba", "Canchaque", "El Carmen de la Frontera", "Huarmaca", "Lalaquiz", "San Miguel de El Faique", "Sondor", "Sondorillo"],
+                "Morropón": ["Chulucanas", "Buenos Aires", "Chalaco", "La Matanza", "Morropon", "Salitral", "San Juan de Bigote", "Santa Catalina", "Santo Domingo"],
+                "Paita": ["Paita", "Amotape", "Arenal", "Colan", "La Huaca", "Tamarindo", "Vichayal"],
+                "Sullana": ["Sullana", "Bellavista", "Ignacio Escudero", "Lancones", "Marcavelica", "Miguel Checa", "Pitipo", "Querecotillo"],
+                "Talara": ["Pariñas", "El Alto", "La Brea", "Lobitos", "Los Organos", "Mancora"],
+                "Sechura": ["Sechura", "Bellavista de la Unión", "Bernal", "Cristo Nos Valga", "Vice", "Rinconada Luya", "San Francisco", "Santa Cruz", "Bellido"],
+                "Pña": ["Pña", "El Carmen", "La Unión", "San Francisco", "Santa Rosa", "Tingömarca", "Vice"]
+            },
+            "Puno": {
+                "Puno": ["Puno", "Acora", "Amantani", "Atuncolla", "Capachica", "Chucuito", "Coata", "Huata", "Mañazo", "Paucarcolla", "Pichacani", "Plateria", "San Antonio", "Tiquillaca", "Vilque"],
+                "Azángaro": ["Azángaro", "Achaya", "Arapa", "Asillo", "Caminaca", "Chupa", "Joque", "Muñani", "Potoni", "Samanco", "San Anton", "San José", "San Juan de Salinas", "Santiago de Pupuja", "Tirapata"],
+                "Carabaya": ["Macusani", "Ajoyani", "Alfonso Ugarte", "Bethania", "Challapata", "Cogullio", "Curahuasi", "El Collao", "Santa Rosa", "San Gaban", "Yanahuaya", "Papakasi", "Cuyocuyo", "Ticaco"],
+                "Chucuito": ["Juli", "Desaguadero", "Huacullani", "Kelluyo", "Pisacoma", "Pomata", "Zepita"],
+                "El Collao": ["Ilave", "Capazo", "Pilcuyo", "Santa Rosa", "Conduriri", "Achaya", "Asillo", "Caminaca", "Chupa", "Muñani"],
+                "Huancané": ["Huancane", "Cojata", "Huatasani", "Inchupalla", "Pusi", "Rosaspata", "Taraco", "Vilque Chico"],
+                "Lampa": ["Lampa", "Cabanilla", "Calapuja", "Nicasio", "Ocuviri", "Palca", "Paratia", "Pucara", "Santa Lucia", "Vilavila"],
+                "Melgar": ["Ayaviri", "Antauta", "Curpahuasi", "Huancan", "Nuñoa", "Orurillo", "Santa Rosa", "Umachiri"],
+                "Moho": ["Moho", "Conima", "Huayrapata", "Tilali"],
+                "San Antonio de Putina": ["Putina", "Ananea", "Pedro Vilca Apaza", "Quilcapuncu", "Sina"],
+                "San Román": ["Juliaca", "Cabana", "Cabanillas", "Caracoto", "Pomata", "San Miguel", "Yanahuaya", "Chucuito"],
+                "Sandia": ["Sandia", "Cuyocuyo", "Limbani", "Patambuco", "Phara", "Quiaca", "San Juan del Oro", "Yanahuaya", "San Pedro de Putina Punco", "Ollachea", "San Juan de Salinas", "San Jose"],
+                "Yunguyo": ["Yunguyo", "Anapia", "Copani", "Cuturapi", "Ollaraya", "Pisacoma", "Pomata", "Zepita"]
+            },
+            "San Martín": {
+                "Moyobamba": ["Moyobamba", "Calzada", "Habana", "Jepelacio", "Soritor", "Yantalo"],
+                "Bellavista": ["Bellavista", "Alto Biavo", "Bajo Biavo", "Huallaga", "San Pablo", "San Rafael"],
+                "El Dorado": ["San José de Sisa", "Agua Blanca", "San Martín", "Santa Rosa", "Shatoja"],
+                "Huallaga": ["Saposoa", "Alto Saposoa", "El Eslabón", "Piscoyacu", "Sacanche", "Tingo de Saposoa"],
+                "Lamas": ["Lamas", "Alonso de Alvarado", "Barranquita", "Caynarachi", "Cuñumbuqui", "Pinto Recodo", "Rumisapa", "San Roque de Cumbaza", "Shanao", "Tabalosos", "Zapatero"],
+                "Mariscal Cáceres": ["Juanjuí", "Campanilla", "Huicungo", "Pachiza", "Pajarillo"],
+                "Picota": ["Picota", "Buenos Aires", "Caspisapa", "Pilluana", "Pucacaca", "San Cristóbal", "San Hilarion", "Shacocbamba", "Shanta", "Tahuania", "Yuracyacu"],
+                "Rioja": ["Rioja", "Awajun", "Elías Soplin Vargas", "Nueva Cajamarca", "Pardo Miguel", "Posic", "San Fernando", "San Juan de Sallique", "Santa Rosa", "Yorongos", "Yuracyacu"],
+                "San Martín": ["Tarapoto", "Alberto Leveau", "Cacatachi", "Chazuta", "Chipurana", "El Porvenir", "Huimbayoc", "Juan Guerra", "La Banda de Shilcayo", "Morales", "Papaplaya", "San Antonio", "Sauce", "Shapaja"],
+                "Tocache": ["Tocache", "Nuevo Progreso", "Polvora", "Shunte", "Uchiza"]
+            },
+            "Tacna": {
+                "Tacna": ["Tacna", "Alto de la Alianza", "Calana", "Ciudad Nueva", "Coronel Gregorio Albarracín Lanchipa", "La Yarada", "Pachia", "Palca", "Pocollay", "Sama", "Yukra"],
+                "Candarave": ["Candarave", "Cairani", "Camilaca", "Curibaya", "Huanuara", "Quilahuani"],
+                "Jorge Basadre": ["Locumba", "Ilabaya", "Ite"],
+                "Tarata": ["Tarata", "Chucatamani", "Estique", "Estique-Pampa", "Papari", "Patachi", "Sausal", "Sítacocha", "Tecalitán", "Tarucachi", "Ticaco"]
+            },
+            "Tumbes": {
+                "Tumbes": ["Tumbes", "Corrales", "La Cruz", "Pampas de Hospital", "San Jacinto", "San Juan de la Virgen"],
+                "Contralmirante Villar": ["Zorritos", "Casitas", "Canoas de Punta Sal"],
+                "Zarumilla": ["Zarumilla", "Aguas Verdes", "Matapalo", "Papayal"]
+            },
+            "Ucayali": {
+                "Coronel Portillo": ["Pucallpa", "Iparia", "Masisea", "Yarinacocha", "Nueva Requena", "Ucayali"],
+                "Atalaya": ["Atalaya", "Chazuta", "Pucacaca", "Shilla", "Yurúa", "Villa Respaldo"],
+                "Padre Abad": ["Padre Abad", "Irazola", "Curimana", "Neshuya", "Pichari"],
+                "Purus": ["Purus", "Purús", "Yurúa"]
             }
         };
 
@@ -1208,6 +1466,8 @@ $gran_total = $total + $envio;
                 alert('El DNI debe tener exactamente 8 dígitos');
                 return false;
             }
+
+            
             
             // Validar teléfono (mínimo 9 dígitos)
             const phoneClean = phone.replace(/\D/g, '');
@@ -1380,6 +1640,11 @@ $gran_total = $total + $envio;
             }
         }
         
+        // Variable para saber si el usuario está logueado
+        const usuarioLogueado = <?php echo json_encode(isset($_SESSION['logueado']) && $_SESSION['logueado'] === true); ?>;
+        
+
+        
         // Inicialización
         document.addEventListener('DOMContentLoaded', function() {
             showStep(0);
@@ -1426,6 +1691,108 @@ $gran_total = $total + $envio;
                 });
             }
         });
+        
+        // Funcionalidad para actualizar cantidades automáticamente
+        document.querySelectorAll('.quantity-input').forEach(input => {
+            input.addEventListener('change', function() {
+                const id = this.getAttribute('data-id');
+                const price = parseFloat(this.getAttribute('data-price'));
+                const regularPrice = parseFloat(this.getAttribute('data-regular-price')) || price;
+                const quantity = parseInt(this.value);
+                
+                // Validar cantidad
+                if (quantity < 1) {
+                    this.value = 1;
+                    return;
+                }
+                
+                // Actualizar subtotal del producto
+                const newSubtotal = price * quantity;
+                document.getElementById(`subtotal-${id}`).textContent = `S/ ${newSubtotal.toFixed(2)}`;
+                
+                // Actualizar ahorros si hay descuento
+                if (regularPrice > price) {
+                    const savings = (regularPrice - price) * quantity;
+                    const savingsElement = document.querySelector(`#savings-${id}`);
+                    if (savingsElement) {
+                        savingsElement.textContent = `Ahorras: S/ ${savings.toFixed(2)}`;
+                    }
+                }
+                
+                // Actualizar totales generales
+                updateTotals();
+                
+                // Enviar actualización al servidor
+                updateQuantityOnServer(id, quantity);
+            });
+        });
+        
+        // Función para actualizar los totales generales
+        function updateTotals() {
+            let subtotal = 0;
+            let totalItems = 0;
+            
+            document.querySelectorAll('.quantity-input').forEach(input => {
+                const price = parseFloat(input.getAttribute('data-price'));
+                const quantity = parseInt(input.value);
+                subtotal += price * quantity;
+                totalItems += quantity;
+            });
+            
+            // Calcular descuentos si existen
+            let descuento_total = 0;
+            <?php if (isset($descuento_total)) echo "descuento_total = $descuento_total;"; ?>;
+            
+            const envio = subtotal >= 100 ? 0 : 20;
+            const gran_total = subtotal + envio;
+            
+            // Actualizar los totales en el sidebar
+            document.querySelector('.summary-line:nth-child(1) span:last-child').textContent = `S/ ${subtotal.toFixed(2)}`;
+            
+            // Actualizar línea de descuento si existe
+            const descuentoElement = document.querySelector('.text-success');
+            if (descuentoElement && descuento_total > 0) {
+                descuentoElement.textContent = `-S/ ${descuento_total.toFixed(2)}`;
+            }
+            
+            // Actualizar envío
+            const envioElement = document.querySelector('.shipping-cost, .shipping-free');
+            if (envioElement) {
+                if (envio === 0) {
+                    envioElement.textContent = 'GRATIS';
+                    envioElement.className = 'shipping-free';
+                } else {
+                    envioElement.textContent = `S/ ${envio.toFixed(2)}`;
+                    envioElement.className = 'shipping-cost';
+                }
+            }
+            
+            // Actualizar total general
+            document.querySelector('.summary-total span:last-child').textContent = `S/ ${gran_total.toFixed(2)}`;
+        }
+        
+        // Función para enviar actualización al servidor
+        function updateQuantityOnServer(id, quantity) {
+            // Enviar solicitud AJAX para actualizar la cantidad en la sesión
+            fetch('ajax_carrito.php', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: `id_producto=${id}&cantidad=${quantity}&accion=update`
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    console.log('Cantidad actualizada en el servidor');
+                } else {
+                    console.error('Error al actualizar cantidad en el servidor:', data.error);
+                }
+            })
+            .catch(error => {
+                console.error('Error de conexión:', error);
+            });
+        }
     </script>
 </body>
 </html>
