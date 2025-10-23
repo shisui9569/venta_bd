@@ -1,6 +1,6 @@
 <?php
 session_start();
-require 'conexion.';
+require 'conexion.php';
 
 // Si el carrito está vacío, redirigir
 if (!isset($_SESSION['carrito']) || count($_SESSION['carrito']) === 0) {
@@ -26,10 +26,34 @@ if (isset($_POST['finalizar'])) {
     $stmt->execute();
     $id_pedido = $stmt->insert_id;
 
+    // Verificar si la columna envio_gratis existe en detalle_pedido, si no, agregarla
+    $result = $conexion->query("SHOW COLUMNS FROM detalle_pedido LIKE 'envio_gratis'");
+    if ($result->num_rows == 0) {
+        $conexion->query("ALTER TABLE detalle_pedido ADD COLUMN envio_gratis BOOLEAN DEFAULT FALSE");
+    }
+
     // Guardar detalle
+    $stmtDetalle = $conexion->prepare("INSERT INTO detalle_pedido (id_pedido, id_producto, nombre_producto, cantidad, precio_unitario, subtotal, envio_gratis) VALUES (?, ?, ?, ?, ?, ?, ?)");
+    
+    // Obtener información de envío gratis de los productos en el carrito
+    $productosConEnvioGratis = [];
+    if (!empty($_SESSION['carrito'])) {
+        $ids = array_map(fn($item) => $item['id'], $_SESSION['carrito']);
+        $placeholders = str_repeat('?', count($ids));
+        $stmt = $conexion->prepare("SELECT id_producto, envio_gratis FROM productos WHERE id_producto IN ($placeholders)");
+        $stmt->bind_param(str_repeat('i', count($ids)), ...$ids);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
+        while ($row = $result->fetch_assoc()) {
+            $productosConEnvioGratis[$row['id_producto']] = $row['envio_gratis'];
+        }
+    }
+    
     foreach ($_SESSION['carrito'] as $producto) {
-        $stmtDetalle = $conexion->prepare("INSERT INTO detalle_pedidos (id_pedido, id_producto, cantidad, precio) VALUES (?, ?, ?, ?)");
-        $stmtDetalle->bind_param("iiid", $id_pedido, $producto['id'], $producto['cantidad'], $producto['precio']);
+        $subtotal = $producto['precio'] * $producto['cantidad'];
+        $envio_gratis = isset($productosConEnvioGratis[$producto['id']]) ? $productosConEnvioGratis[$producto['id']] : false;
+        $stmtDetalle->bind_param("iisiddi", $id_pedido, $producto['id'], $producto['nombre'], $producto['cantidad'], $producto['precio'], $subtotal, $envio_gratis);
         $stmtDetalle->execute();
     }
 
